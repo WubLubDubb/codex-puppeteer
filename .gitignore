@@ -1,0 +1,32 @@
+﻿# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Common dependency and build directories
+node_modules/
+dist/
+coverage/
+
+# Runtime state
+.agent/runtime/
+.agent/logs/
+.agent/testing/
+.agent/tmp/
+.agent/logs-probe/
+.agent/logs-probe-2/
+.agent/runtime-probe/
+.agent/runtime-probe-2/
+
+# Temporary probes and local notes
+tmp/
+@AutomationLog.txt

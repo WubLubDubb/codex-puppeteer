@@ -1,0 +1,1494 @@
+import { createPreferredCodexAdapter } from "./codex-adapter.js";
+import { ProjectContextResolver } from "./context-resolver.js";
+import { defaultConfig } from "./default-config.js";
+import { analyzeCodexOutputLines } from "./output-analysis.js";
+import {
+  CommandValidationError,
+  ConfigurationError,
+  ContextResolutionError,
+  AuthorizationError,
+  serializeError
+} from "./errors.js";
+import { WeChatCommandParser } from "./message-parser.js";
+import { InMemoryNotifier } from "./notifier.js";
+import { PolicyEngine } from "./policy-engine.js";
+import { InMemorySessionRepository } from "./session-repository.js";
+import { InMemorySourceBindingRepository } from "./source-binding-repository.js";
+import { DryRunSystemAdapter } from "./system-adapter.js";
+import { InMemoryTaskRepository } from "./task-repository.js";
+
+function now() {
+  return new Date().toISOString();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRejectedError(error) {
+  return (
+    error instanceof CommandValidationError ||
+    error instanceof ConfigurationError ||
+    error instanceof ContextResolutionError ||
+    error instanceof AuthorizationError
+  );
+}
+
+function requireStringFlag(args, key, message) {
+  if (typeof args[key] !== "string" || args[key].trim() === "") {
+    throw new CommandValidationError(message, "command_argument_missing", { key });
+  }
+
+  return args[key].trim();
+}
+
+function parseOptionalNonNegativeIntegerFlag(args, key, message) {
+  if (args[key] === undefined) {
+    return null;
+  }
+
+  const value = Number(args[key]);
+
+  if (!Number.isInteger(value) || value < 0) {
+    throw new CommandValidationError(message, "command_argument_invalid", {
+      key,
+      value: args[key]
+    });
+  }
+
+  return value;
+}
+
+function isSessionExecutionStatus(status) {
+  return status === "starting" || status === "running";
+}
+
+function isSessionAvailableStatus(status) {
+  return isSessionExecutionStatus(status) || status === "ready";
+}
+
+function requiresProcessExitForWait(session) {
+  return session?.driver === "exec-json";
+}
+
+function isLogicalSessionId(value) {
+  return /^session-\d+$/i.test(String(value ?? "").trim());
+}
+
+function truncateText(value, maxLength = 3000) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function shortenIdentifier(value, prefixLength = 8, suffixLength = 4) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  if (text.length <= prefixLength + suffixLength + 3) {
+    return text;
+  }
+
+  return `${text.slice(0, prefixLength)}...${text.slice(-suffixLength)}`;
+}
+
+function formatSessionLine(session, activeSessionId = null, selectionIndex = null) {
+  const prefix = session.sessionId === activeSessionId ? "* " : "";
+  const sessionLabel = selectionIndex === null ? session.sessionId : `${selectionIndex}. ${session.sessionId}`;
+  const resumeTarget = session.codexThreadId
+    ? ` | codex=${shortenIdentifier(session.codexThreadId)}`
+    : session.codexResumeMode === "last"
+      ? " | codex=last"
+      : "";
+  return `${prefix}${sessionLabel} | ${session.projectName} | ${session.status}${resumeTarget}`;
+}
+
+function formatSystemSnapshot(snapshot) {
+  if (!snapshot) {
+    return "System probe collected.";
+  }
+
+  return [
+    "System status:",
+    `platform: ${snapshot.platform}`,
+    `activeSessions: ${snapshot.activeSessions}`,
+    `cpuCount: ${snapshot.cpuCount}`,
+    `freeMemory: ${snapshot.freeMemory}`,
+    `totalMemory: ${snapshot.totalMemory}`
+  ].join("\n");
+}
+
+function formatConfiguredProjectLine(project) {
+  const alias = String(project?.alias ?? "").trim();
+  const projectName = String(project?.projectName ?? "").trim();
+  const projectRoot = String(project?.projectRoot ?? "").trim();
+  const pathSegments = projectRoot.split(/[\\/]/).filter(Boolean);
+  const baseName = pathSegments.at(-1) ?? "";
+  const parentName = pathSegments.at(-2) ?? "";
+
+  if (projectName && projectName.localeCompare(alias, undefined, { sensitivity: "base" }) !== 0) {
+    return `- ${alias} -> ${projectName}`;
+  }
+
+  if (baseName && baseName.localeCompare(alias, undefined, { sensitivity: "base" }) !== 0) {
+    return `- ${alias} -> ${baseName}`;
+  }
+
+  const compactTarget = parentName && baseName ? `${parentName}/${baseName}` : projectRoot || alias;
+  return `- ${alias} -> ${compactTarget}`;
+}
+
+function formatDiscoveredProjectLine(project) {
+  return `- ${project.name}`;
+}
+
+function truncateInlineText(value, maxLength = 120) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function formatCompactTimestamp(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+
+  if (match) {
+    return `${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
+  }
+
+  return truncateInlineText(text || "unknown-time", 16);
+}
+
+function formatLocalCodexConversationLine(conversation, selectionIndex = null) {
+  const updatedAt = formatCompactTimestamp(conversation.updatedAt);
+  const title = truncateInlineText(conversation.title, 48) || "(untitled conversation)";
+  const conversationLabel = selectionIndex === null
+    ? conversation.codexSessionId
+    : `${selectionIndex}. ${conversation.codexSessionId}`;
+  return `${conversationLabel}
+  ${updatedAt} | ${title}`;
+}
+
+function formatCommandResponseMessage(response) {
+  if (!response || typeof response !== "object") {
+    return "Command completed.";
+  }
+
+  switch (response.actionId) {
+    case "create":
+    case "attach":
+    case "activate":
+      return [
+        response.summary,
+        response.session?.projectRoot ? `workspace: ${response.session.projectRoot}` : null
+      ]
+        .filter(Boolean)
+        .join("\n");
+    case "list": {
+      const managedSessions = Array.isArray(response.sessions) ? response.sessions : [];
+      const localCodexSessions = Array.isArray(response.localCodexSessions)
+        ? response.localCodexSessions
+        : [];
+      const selectionEntries = Array.isArray(response.selectionEntries)
+        ? response.selectionEntries
+        : [];
+      const totalLocalCodexSessions = response.totalLocalCodexSessions ?? localCodexSessions.length;
+      const managedSelectionBySessionId = new Map(
+        selectionEntries
+          .filter((entry) => entry?.type === "managed" && entry?.sessionId)
+          .map((entry) => [entry.sessionId, entry.index])
+      );
+      const localSelectionByConversationId = new Map(
+        selectionEntries
+          .filter((entry) => entry?.type === "local" && entry?.codexSessionId)
+          .map((entry) => [entry.codexSessionId, entry.index])
+      );
+      const sections = [`Current sessions (${managedSessions.length}):`];
+
+      if (managedSessions.length > 0) {
+        sections.push(
+          ...managedSessions.map((session) =>
+            formatSessionLine(
+              session,
+              response.activeSessionId,
+              managedSelectionBySessionId.get(session.sessionId) ?? null
+            )
+          )
+        );
+      } else {
+        sections.push("- (none)");
+      }
+
+      if (response.localCodexHistoryError) {
+        sections.push(`Recent history: unavailable (${response.localCodexHistoryError})`);
+      } else {
+        sections.push(`Recent history (${localCodexSessions.length}/${totalLocalCodexSessions}):`);
+
+        if (localCodexSessions.length > 0) {
+          sections.push(
+            ...localCodexSessions.map((conversation) =>
+              formatLocalCodexConversationLine(
+                conversation,
+                localSelectionByConversationId.get(conversation.codexSessionId) ?? null
+              )
+            )
+          );
+        } else {
+          sections.push("- (none)");
+        }
+
+        if (response.omittedLocalCodexSessions > 0) {
+          sections.push(`- +${response.omittedLocalCodexSessions} more history item(s). Use /list -a or /list -c ${totalLocalCodexSessions > 20 ? 20 : totalLocalCodexSessions}.`);
+        }
+      }
+
+      return sections.join("\n");
+    }
+    case "projects":
+      return response.rendered ? truncateText(response.rendered) : response.summary;
+    case "send": {
+      const sessionLabel = response.session?.sessionId ?? response.sessionId ?? "unknown";
+      const hasSettledAssistantReply =
+        response.status === "settled" && response.completionState === "assistant_answer_detected";
+
+      if (response.assistantText) {
+        return hasSettledAssistantReply
+          ? `Session ${sessionLabel} assistant output:
+${response.assistantText}`
+          : `Session ${sessionLabel} partial assistant output (${response.status ?? "unknown"}, ${response.completionState ?? "unknown"}):
+${response.assistantText}`;
+      }
+
+      return [
+        response.summary,
+        response.rendered ? truncateText(response.rendered) : null
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    case "screen":
+      return response.rendered
+        ? `Session ${response.sessionId} output:\n${truncateText(response.rendered)}`
+        : response.summary;
+    case "wait":
+      if (response.assistantText) {
+        return `Session ${response.sessionId} assistant output:\n${truncateText(response.assistantText)}`;
+      }
+
+      if (response.rendered) {
+        return `${response.summary}\n${truncateText(response.rendered)}`;
+      }
+
+      return response.summary;
+    case "read":
+      return response.content
+        ? `File ${response.relativePath}:\n${truncateText(response.content)}`
+        : response.summary;
+    case "sys":
+      return formatSystemSnapshot(response.snapshot);
+    default:
+      return response.summary ?? "Command completed.";
+  }
+}
+
+export class AutomationAgent {
+  constructor({
+    config = defaultConfig,
+    parser = new WeChatCommandParser(),
+    repository = new InMemoryTaskRepository(),
+    sessionRepository = new InMemorySessionRepository({
+      maxBufferedLines: config.runtime.maxBufferedLines
+    }),
+    sourceBindingRepository = new InMemorySourceBindingRepository(),
+    notifier = new InMemoryNotifier(),
+    codexAdapter = createPreferredCodexAdapter(),
+    systemAdapter = new DryRunSystemAdapter(),
+    contextResolver = new ProjectContextResolver({
+      projects: config.projects,
+      allowedRoots: config.security.allowedProjectRoots
+    }),
+    policyEngine = new PolicyEngine(config.security)
+  } = {}) {
+    this.config = config;
+    this.parser = parser;
+    this.repository = repository;
+    this.sessionRepository = sessionRepository;
+    this.sourceBindingRepository = sourceBindingRepository;
+    this.notifier = notifier;
+    this.codexAdapter = codexAdapter;
+    this.systemAdapter = systemAdapter;
+    this.contextResolver = contextResolver;
+    this.policyEngine = policyEngine;
+    this.listSelections = new Map();
+  }
+
+  #parseIncomingMessage(message) {
+    const content = String(message?.content ?? "").trim();
+
+    if (!content) {
+      throw new CommandValidationError("Command text is required.", "command_empty");
+    }
+
+    if (content.startsWith("/")) {
+      return this.parser.parse(content);
+    }
+
+    const sourceId = String(message?.sourceId ?? "").trim();
+    const binding = this.sourceBindingRepository.getBinding(sourceId);
+
+    if (!binding?.sessionId) {
+      throw new CommandValidationError(
+        "No active session is currently bound for this source. Use /create first, or send an explicit /send -n <sessionId> -m <prompt> command.",
+        "session_not_bound",
+        { sourceId }
+      );
+    }
+
+    const session = this.sessionRepository.getSession(binding.sessionId);
+    if (!session || !isSessionAvailableStatus(session.status)) {
+      this.sourceBindingRepository.clearBinding(sourceId);
+      throw new CommandValidationError(
+        `The current session ${binding.sessionId} is no longer available. Create a new session or send /send -n <sessionId> -m <prompt>.`,
+        "session_not_bound",
+        {
+          sourceId,
+          sessionId: binding.sessionId
+        }
+      );
+    }
+
+    return {
+      commandKey: "send",
+      args: {
+        n: binding.sessionId,
+        m: content
+      },
+      raw: message.content,
+      implicitPrompt: true
+    };
+  }
+
+  #setActiveSessionBinding(sourceId, sessionId) {
+    if (typeof sourceId !== "string" || sourceId.trim() === "") {
+      return;
+    }
+
+    this.sourceBindingRepository.setBinding({ sourceId, sessionId });
+  }
+
+  #rememberListSelections(sourceId, selectionEntries) {
+    if (typeof sourceId !== "string" || sourceId.trim() === "") {
+      return;
+    }
+
+    const normalizedSourceId = sourceId.trim();
+    const normalizedEntries = Array.isArray(selectionEntries)
+      ? selectionEntries
+          .map((entry) => ({
+            index: Number(entry?.index ?? 0),
+            type: entry?.type === "local" ? "local" : "managed",
+            sessionId: entry?.sessionId ? String(entry.sessionId) : null,
+            codexSessionId: entry?.codexSessionId ? String(entry.codexSessionId) : null
+          }))
+          .filter((entry) => Number.isInteger(entry.index) && entry.index > 0)
+      : [];
+
+    this.listSelections.set(normalizedSourceId, normalizedEntries);
+  }
+
+  #resolveNumberedSelection(targetRef, sourceId) {
+    const normalizedTargetRef = String(targetRef ?? "").trim();
+    if (!/^\d+$/.test(normalizedTargetRef)) {
+      return null;
+    }
+
+    const normalizedSourceId = String(sourceId ?? "").trim();
+    const selectionEntries = normalizedSourceId ? this.listSelections.get(normalizedSourceId) ?? [] : [];
+
+    if (selectionEntries.length === 0) {
+      throw new ContextResolutionError(
+        `Numeric selection "${normalizedTargetRef}" is unavailable because there is no recent /list result for this chat. Run /list first.`,
+        "list_selection_missing",
+        { selection: normalizedTargetRef }
+      );
+    }
+
+    const entry = selectionEntries.find((candidate) => candidate.index === Number(normalizedTargetRef));
+    if (!entry) {
+      throw new ContextResolutionError(
+        `Numeric selection "${normalizedTargetRef}" is not present in the latest /list result for this chat. Run /list again or expand history with /list -a or /list -c <count>.`,
+        "list_selection_missing",
+        { selection: normalizedTargetRef }
+      );
+    }
+
+    return structuredClone(entry);
+  }
+
+  #clearBindingsForSession(sessionId) {
+    this.sourceBindingRepository.clearBindingsForSession(sessionId);
+  }
+
+  async receiveText(message) {
+    const taskId = this.repository.nextTaskId();
+    this.repository.createTask({ taskId, message });
+
+    await this.notifier.send({
+      taskId,
+      phase: "command.received",
+      sourceId: message.sourceId,
+      message: `Received command from ${message.sourceId}.`
+    });
+
+    try {
+      const parsedCommand = this.#parseIncomingMessage(message);
+      this.repository.setParsedCommand(taskId, parsedCommand);
+
+      this.policyEngine.authorizeSource({ message });
+      this.policyEngine.authorizeShutdown(parsedCommand);
+
+      const task = await this.#runCommand({ taskId, message, parsedCommand });
+      return {
+        ok: task.status === "completed",
+        task,
+        notifications: this.#notificationsForTask(taskId)
+      };
+    } catch (error) {
+      const serialized = serializeError(error);
+      const status = isRejectedError(error) ? "rejected" : "failed";
+      const phase = status === "rejected" ? "command.rejected" : "command.failed";
+
+      this.repository.addError(taskId, serialized);
+      this.repository.setStatus(taskId, status, {
+        resultSummary: serialized.message
+      });
+      this.repository.appendEvent(taskId, phase, {
+        error: serialized
+      });
+
+      await this.notifier.send({
+        taskId,
+        phase,
+        sourceId: message.sourceId,
+        message: `${status === "rejected" ? "Command rejected" : "Command failed"}: ${serialized.message}`
+      });
+
+      const task = this.repository.getTask(taskId);
+      return {
+        ok: false,
+        task,
+        notifications: this.#notificationsForTask(taskId)
+      };
+    }
+  }
+
+  async #runCommand({ taskId, message, parsedCommand }) {
+    const stepId = `${parsedCommand.commandKey}-${Date.now()}`;
+
+    this.repository.setStatus(taskId, "running", {
+      resultSummary: null
+    });
+    this.repository.appendEvent(taskId, "command.started", {
+      commandKey: parsedCommand.commandKey
+    });
+    this.repository.addStep(taskId, {
+      stepId,
+      actionId: parsedCommand.commandKey,
+      adapter: this.#adapterLabelForCommand(parsedCommand.commandKey),
+      status: "running",
+      startedAt: now(),
+      result: null,
+      error: null
+    });
+
+    await this.notifier.send({
+      taskId,
+      phase: "command.started",
+      sourceId: message.sourceId,
+      message: `Command ${parsedCommand.commandKey} started.`
+    });
+
+    try {
+      const response = await this.#dispatchCommand(parsedCommand, message, taskId);
+      const completionMessage = formatCommandResponseMessage(response);
+      this.repository.completeStep(taskId, stepId, response);
+      this.repository.setResponse(taskId, response);
+      this.repository.setStatus(taskId, "completed", {
+        resultSummary: completionMessage
+      });
+      this.repository.appendEvent(taskId, "command.completed", {
+        commandKey: parsedCommand.commandKey
+      });
+
+      await this.notifier.send({
+        taskId,
+        phase: "command.completed",
+        sourceId: message.sourceId,
+        message: completionMessage
+      });
+
+      return this.repository.getTask(taskId);
+    } catch (error) {
+      const serialized = serializeError(error);
+      this.repository.failStep(taskId, stepId, serialized);
+      throw error;
+    }
+  }
+
+  async #dispatchCommand(parsedCommand, message, taskId) {
+    switch (parsedCommand.commandKey) {
+      case "create":
+        return this.#handleCreate(parsedCommand.args, message);
+      case "attach":
+        return this.#handleAttach(parsedCommand.args, message);
+      case "attach-last":
+        return this.#handleAttach({ ...parsedCommand.args, last: true }, message);
+      case "list":
+        return this.#handleList(parsedCommand.args, message);
+      case "projects":
+        return this.#handleProjects(parsedCommand.args);
+      case "activate":
+        return this.#handleActivate(parsedCommand.args, message);
+      case "send":
+        return this.#handleSend(parsedCommand.args, message, taskId);
+      case "read":
+        return this.#handleRead(parsedCommand.args, message);
+      case "screen":
+        return this.#handleScreen(parsedCommand.args, message);
+      case "wait":
+        return this.#handleDeprecatedWait();
+      case "kill":
+        return this.#handleKill(parsedCommand.args, message);
+      case "enablepermission":
+        return this.#handleEnablePermission(parsedCommand.args, message);
+      case "sys":
+        return this.#handleSystemProbe();
+      case "shutdown":
+        return this.#handleShutdown(parsedCommand.args);
+      case "cancel_shutdown":
+        return this.#handleCancelShutdown();
+      default:
+        throw new ConfigurationError(
+          `Unknown command "${parsedCommand.commandKey}".`,
+          "command_unknown",
+          { commandKey: parsedCommand.commandKey }
+        );
+    }
+  }
+
+  async #handleAttach(args, message) {
+    const workspaceRef = requireStringFlag(args, "w", "The -w flag is required for /attach.");
+    const explicitResumeId =
+      typeof args.i === "string" && args.i.trim() !== ""
+        ? args.i.trim()
+        : typeof args.id === "string" && args.id.trim() !== ""
+          ? args.id.trim()
+          : null;
+    const attachLast = args.last === true;
+
+    if (attachLast && explicitResumeId) {
+      throw new CommandValidationError(
+        "Use either -last or -i/-id for /attach, not both.",
+        "command_argument_invalid",
+        {
+          keys: ["last", "i", "id"]
+        }
+      );
+    }
+
+    if (!attachLast && !explicitResumeId) {
+      throw new CommandValidationError(
+        "Use /attach -last or /attach -i <codexSessionId> to bind an existing Codex conversation.",
+        "command_argument_missing",
+        {
+          keys: ["last", "i", "id"]
+        }
+      );
+    }
+
+    const projectName =
+      typeof args.n === "string" && args.n.trim() !== "" ? args.n.trim() : undefined;
+    const launchMode =
+      args.mode === "foreground-debug" ? "foreground-debug" : this.config.runtime.defaultLaunchMode;
+    const context = this.contextResolver.resolveProject({
+      workspaceRef,
+      projectName,
+      launchMode
+    });
+
+    const sessionId = this.sessionRepository.nextSessionId();
+    const attachedSession = this.sessionRepository.createSession({
+      sessionId,
+      ...context,
+      permissionMode: this.config.runtime.defaultPermissionMode,
+      driver: "exec-json",
+      codexThreadId: explicitResumeId,
+      codexResumeMode: attachLast ? "last" : null,
+      status: "ready"
+    });
+
+    this.#setActiveSessionBinding(message?.sourceId, sessionId);
+
+    return {
+      actionId: "attach",
+      summary: attachLast
+        ? `Attached session ${sessionId} to the most recent local Codex conversation.`
+        : `Attached session ${sessionId} to Codex conversation ${explicitResumeId}.`,
+      session: attachedSession,
+      resumeTarget: attachLast ? "last" : explicitResumeId
+    };
+  }
+
+  async #handleCreate(args, message) {
+    const projectName = requireStringFlag(args, "n", "The -n flag is required for /create.");
+    const workspaceRef = requireStringFlag(args, "w", "The -w flag is required for /create.");
+    const launchMode =
+      args.mode === "foreground-debug" ? "foreground-debug" : this.config.runtime.defaultLaunchMode;
+    const context = this.contextResolver.resolveProject({
+      workspaceRef,
+      projectName,
+      launchMode
+    });
+
+    const sessionId = this.sessionRepository.nextSessionId();
+    const session = this.sessionRepository.createSession({
+      sessionId,
+      ...context,
+      permissionMode: this.config.runtime.defaultPermissionMode,
+      status: "starting"
+    });
+
+    try {
+      const launch = await this.codexAdapter.createSession({
+        session,
+        hooks: this.#sessionHooks(sessionId)
+      });
+
+      if (launch.output) {
+        this.#appendAdapterOutput(sessionId, launch.output, "stdout");
+      }
+
+      if (launch.sessionStatus === "ready") {
+        this.sessionRepository.markReady(sessionId, {
+          pid: launch.pid ?? null,
+          driver: launch.driver ?? null,
+          codexThreadId: launch.codexThreadId ?? null,
+          codexResumeMode: launch.codexResumeMode ?? null
+        });
+      } else {
+        this.sessionRepository.markRunning(sessionId, {
+          pid: launch.pid ?? null,
+          driver: launch.driver ?? null,
+          codexThreadId: launch.codexThreadId ?? null,
+          codexResumeMode: launch.codexResumeMode ?? null
+        });
+      }
+      this.#setActiveSessionBinding(message?.sourceId, sessionId);
+
+      const snapshot = this.sessionRepository.getSession(sessionId);
+      return {
+        actionId: "create",
+        summary: `Created session ${sessionId} for ${snapshot.projectName}.`,
+        session: snapshot,
+        launch
+      };
+    } catch (error) {
+      this.sessionRepository.deleteSession(sessionId);
+      throw error;
+    }
+  }
+
+  async #handleActivate(args, message) {
+    const session = this.#requireSession(args, message);
+
+    if (!isSessionAvailableStatus(session.status)) {
+      throw new ContextResolutionError(
+        `Session ${session.sessionId} is not available for activation because it is in status "${session.status}".`,
+        "session_not_available",
+        {
+          sessionId: session.sessionId,
+          status: session.status
+        }
+      );
+    }
+
+    this.#setActiveSessionBinding(message?.sourceId, session.sessionId);
+
+    return {
+      actionId: "activate",
+      summary: `Activated session ${session.sessionId} for ${session.projectName}. Plain text will now be sent there.`,
+      session: this.sessionRepository.getSession(session.sessionId)
+    };
+  }
+
+  async #handleList(args, message) {
+    const sessions = this.sessionRepository.listSessions();
+    const activeSessionId = this.sourceBindingRepository.getBinding(message?.sourceId)?.sessionId ?? null;
+    const requestedHistoryCount = parseOptionalNonNegativeIntegerFlag(args, "c", "The -c flag must be a positive integer.");
+
+    if (requestedHistoryCount === 0) {
+      throw new CommandValidationError("The -c flag must be a positive integer.", "command_argument_invalid", { key: "c", value: args?.c });
+    }
+
+    const historyLimit = args?.a === true ? Number.MAX_SAFE_INTEGER : requestedHistoryCount ?? 8;
+    let localListing = {
+      conversations: [],
+      totalCount: 0,
+      stateDir: null,
+      sessionIndexPath: null
+    };
+    let localCodexHistoryError = null;
+
+    if (typeof this.codexAdapter.listLocalSessions === "function") {
+      try {
+        localListing = await this.codexAdapter.listLocalSessions();
+      } catch (error) {
+        localCodexHistoryError = serializeError(error).message;
+      }
+    }
+
+    const indexedLocalConversations = Array.isArray(localListing?.conversations)
+      ? localListing.conversations
+      : [];
+    const localConversationById = new Map(
+      indexedLocalConversations.map((conversation) => [conversation.codexSessionId, conversation])
+    );
+    const managedSessions = sessions.map((session) => ({
+      ...session,
+      localConversation: session.codexThreadId
+        ? localConversationById.get(session.codexThreadId) ?? null
+        : null
+    }));
+    const attachedConversationIds = new Set(
+      managedSessions
+        .map((session) => session.codexThreadId)
+        .filter((value) => typeof value === "string" && value.trim() !== "")
+    );
+    const unmatchedLocalCodexSessions = indexedLocalConversations.filter(
+      (conversation) => !attachedConversationIds.has(conversation.codexSessionId)
+    );
+    const localCodexSessions = unmatchedLocalCodexSessions.slice(0, historyLimit);
+    const omittedLocalCodexSessions = Math.max(0, unmatchedLocalCodexSessions.length - localCodexSessions.length);
+    const selectionEntries = [];
+    let selectionIndex = 1;
+
+    for (const session of managedSessions) {
+      selectionEntries.push({
+        index: selectionIndex,
+        type: "managed",
+        sessionId: session.sessionId,
+        codexSessionId: session.codexThreadId ?? null
+      });
+      selectionIndex += 1;
+    }
+
+    for (const conversation of localCodexSessions) {
+      selectionEntries.push({
+        index: selectionIndex,
+        type: "local",
+        sessionId: null,
+        codexSessionId: conversation.codexSessionId
+      });
+      selectionIndex += 1;
+    }
+
+    this.#rememberListSelections(message?.sourceId, selectionEntries);
+    const summary = localCodexHistoryError
+      ? `Managed ${managedSessions.length} session(s); local Codex history unavailable.`
+      : `Managed ${managedSessions.length} session(s); local Codex history ${unmatchedLocalCodexSessions.length} conversation(s).`;
+
+    return {
+      actionId: "list",
+      summary,
+      sessions: managedSessions,
+      activeSessionId,
+      localCodexSessions,
+      totalManagedSessions: managedSessions.length,
+      totalLocalCodexSessions: unmatchedLocalCodexSessions.length,
+      omittedLocalCodexSessions,
+      selectionEntries,
+      localCodexHistoryError,
+      localCodexStateDir: localListing?.stateDir ?? null,
+      localCodexSessionIndexPath: localListing?.sessionIndexPath ?? null
+    };
+  }
+
+  async #handleProjects(args) {
+    const workspaceRef = typeof args.w === "string" && args.w.trim() !== "" ? args.w.trim() : undefined;
+    const result = await this.contextResolver.listProjects({ workspaceRef });
+    const renderedSections = [];
+    const exampleProject = result.roots.find((root) => root.directories.length > 0)?.directories[0] ?? null;
+
+    for (const root of result.roots) {
+      renderedSections.push(`Projects under ${root.rootPath} (${root.directories.length}):`);
+      if (root.directories.length === 0) {
+        renderedSections.push("- (none)");
+        continue;
+      }
+
+      renderedSections.push(...root.directories.map((project) => formatDiscoveredProjectLine(project)));
+    }
+
+    if (exampleProject) {
+      renderedSections.push(`Example: /create -n MyTask -w ${exampleProject.projectRoot}`);
+    }
+    const summary = `Projects (${result.totalProjectCount}) across ${result.totalRootCount} root(s).`;
+
+    return {
+      actionId: "projects",
+      summary,
+      rendered: renderedSections.join("\n"),
+      workspaceRef: result.workspaceRef,
+      configuredProjects: result.configuredProjects,
+      roots: result.roots,
+      totalProjectCount: result.totalProjectCount,
+      totalRootCount: result.totalRootCount
+    };
+  }
+
+  async #handleSend(args, message, taskId = null) {
+    const session = await this.#resolveSendSession(args, message);
+    if (!isSessionAvailableStatus(session.status)) {
+      throw new ContextResolutionError(
+        `Session ${session.sessionId} is not available for prompts because it is in status "${session.status}".`,
+        "session_not_available",
+        {
+          sessionId: session.sessionId,
+          status: session.status
+        }
+      );
+    }
+
+    const prompt = requireStringFlag(args, "m", "The -m flag is required for /send.");
+    const outputCursor = this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0;
+    const result = await this.codexAdapter.sendPrompt({
+      session,
+      prompt,
+      hooks: this.#sessionHooks(session.sessionId)
+    });
+
+    if (result.sessionStatus === "ready") {
+      this.sessionRepository.markReady(session.sessionId, {
+        pid: result.pid ?? null,
+        driver: result.driver ?? session.driver ?? null,
+        codexThreadId: result.codexThreadId ?? session.codexThreadId ?? null,
+        codexResumeMode: result.codexResumeMode ?? session.codexResumeMode ?? null
+      });
+    } else if (result.sessionStatus === "running" || result.pid) {
+      this.sessionRepository.markRunning(session.sessionId, {
+        pid: result.pid ?? null,
+        driver: result.driver ?? session.driver ?? null,
+        codexThreadId: result.codexThreadId ?? session.codexThreadId ?? null,
+        codexResumeMode: result.codexResumeMode ?? session.codexResumeMode ?? null
+      });
+    }
+
+    this.#appendAdapterOutput(session.sessionId, [`> ${prompt}`], "stdin");
+
+    if (result.output) {
+      this.#appendAdapterOutput(session.sessionId, result.output, "stdout");
+    }
+
+    this.#setActiveSessionBinding(message?.sourceId, session.sessionId);
+    const followUpScreenCommand = `/screen -n ${session.sessionId} -c ${outputCursor}`;
+
+    if (taskId) {
+      this.repository.appendEvent(taskId, "command.screen_hint", {
+        sessionId: session.sessionId,
+        outputCursor,
+        command: followUpScreenCommand
+      });
+
+      await this.notifier.send({
+        taskId,
+        phase: "command.screen_hint",
+        sourceId: message?.sourceId,
+        message: `screen: ${followUpScreenCommand}`
+      });
+    }
+
+    const waitTimeoutMs =
+      this.config.runtime.defaultSendWaitTimeoutMs ?? this.config.runtime.defaultWaitTimeoutMs;
+    const waitResult = await this.#handleWait({
+      n: session.sessionId,
+      c: outputCursor,
+      t: waitTimeoutMs
+    });
+    const snapshot = this.sessionRepository.getSession(session.sessionId);
+    const shutdownEvaluation = await this.#evaluateArmedShutdown();
+    const hasSettledAssistantReply =
+      waitResult.status === "settled" && waitResult.completionState === "assistant_answer_detected";
+
+    return {
+      actionId: "send",
+      summary: hasSettledAssistantReply
+        ? `Prompt sent to session ${session.sessionId}; assistant reply completed.`
+        : waitResult.assistantText
+          ? `Prompt sent to session ${session.sessionId}; partial assistant output captured so far (${waitResult.status}, ${waitResult.completionState}).`
+          : `Prompt sent to session ${session.sessionId}; no complete assistant reply yet (${waitResult.status}, ${waitResult.completionState}).`,
+      session: snapshot,
+      sessionStatus: waitResult.sessionStatus,
+      outputCursor,
+      latestCursor: waitResult.latestCursor,
+      status: waitResult.status,
+      completionState: waitResult.completionState,
+      elapsedMs: waitResult.elapsedMs,
+      meaningfulLineCount: waitResult.meaningfulLineCount,
+      assistantLines: waitResult.assistantLines,
+      assistantText: waitResult.assistantText,
+      uiOnlyActivity: waitResult.uiOnlyActivity,
+      classifications: waitResult.classifications,
+      lines: waitResult.lines,
+      rendered: waitResult.rendered,
+      followUpScreenCommand,
+      shutdownEvaluation
+    };
+  }
+
+  async #handleRead(args, message) {
+    const session = this.#requireSession(args, message);
+    const relativePath = requireStringFlag(args, "f", "The -f flag is required for /read.");
+    const fileRequest = this.contextResolver.resolveFileRequest(session, relativePath);
+    const result = await this.codexAdapter.readFile(fileRequest);
+
+    return {
+      actionId: "read",
+      summary: result.summary,
+      sessionId: session.sessionId,
+      relativePath: result.relativePath,
+      content: result.content
+    };
+  }
+
+  async #handleScreen(args, message) {
+    const session = this.#requireSession(args, message);
+    const requestedLimit = args.l ? Number(args.l) : this.config.runtime.defaultScreenLines;
+    const afterCursor = parseOptionalNonNegativeIntegerFlag(
+      args,
+      "c",
+      "The -c flag must be a non-negative integer when used with /screen."
+    );
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, this.config.runtime.maxBufferedLines)
+        : this.config.runtime.defaultScreenLines;
+    const lines =
+      this.sessionRepository.getScreen(session.sessionId, {
+        limit,
+        afterSequence: afterCursor
+      }) ?? [];
+    const latestCursor = this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0;
+
+    return {
+      actionId: "screen",
+      summary:
+        lines.length > 0
+          ? `Showing ${lines.length} captured line(s) for ${session.sessionId}${
+              afterCursor === null ? "" : ` since cursor ${afterCursor}`
+            }.`
+          : `Session ${session.sessionId} has no captured output${
+              afterCursor === null ? " yet" : ` after cursor ${afterCursor} yet`
+            }.`,
+      sessionId: session.sessionId,
+      afterCursor,
+      latestCursor,
+      lines,
+      rendered: lines.map((entry) => `[${entry.stream}] ${entry.line}`).join("\n")
+    };
+  }
+
+  #handleDeprecatedWait() {
+    throw new CommandValidationError(
+      "The /wait command is no longer needed. /send now waits automatically; use /screen to inspect current output.",
+      "command_deprecated",
+      {
+        commandKey: "wait"
+      }
+    );
+  }
+
+  async #handleWait(args) {
+    const session = this.#requireSession(args);
+    const afterCursor = parseOptionalNonNegativeIntegerFlag(
+      args,
+      "c",
+      "The -c flag is required for /wait and must be a non-negative integer."
+    );
+
+    if (afterCursor === null) {
+      throw new CommandValidationError(
+        "The -c flag is required for /wait and must be a non-negative integer.",
+        "command_argument_missing",
+        { key: "c" }
+      );
+    }
+
+    const idleMs =
+      parseOptionalNonNegativeIntegerFlag(
+        args,
+        "i",
+        "The -i flag must be a non-negative integer when used with /wait."
+      ) ?? this.config.runtime.defaultWaitIdleMs;
+    const timeoutMs =
+      parseOptionalNonNegativeIntegerFlag(
+        args,
+        "t",
+        "The -t flag must be a non-negative integer when used with /wait."
+      ) ?? this.config.runtime.defaultWaitTimeoutMs;
+    const pollMs =
+      parseOptionalNonNegativeIntegerFlag(
+        args,
+        "p",
+        "The -p flag must be a non-negative integer when used with /wait."
+      ) ?? this.config.runtime.defaultWaitPollMs;
+
+    const requestedLimit = args.l ? Number(args.l) : this.config.runtime.defaultScreenLines;
+    const lineLimit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, this.config.runtime.maxBufferedLines)
+        : this.config.runtime.defaultScreenLines;
+    const startedAt = Date.now();
+    let latestSession = this.sessionRepository.getSession(session.sessionId);
+    let latestCursor = this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0;
+    let lastObservedActivityAt =
+      latestCursor > afterCursor && latestSession?.lastActivityAt
+        ? Date.parse(latestSession.lastActivityAt) || startedAt
+        : startedAt;
+    let status = "timeout";
+    let fullAnalysis = analyzeCodexOutputLines([]);
+
+    while (true) {
+      latestSession = this.sessionRepository.getSession(session.sessionId);
+      latestCursor = this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0;
+      const fullLines =
+        this.sessionRepository.getScreen(session.sessionId, {
+          limit: this.config.runtime.maxBufferedLines,
+          afterSequence: afterCursor
+        }) ?? [];
+      fullAnalysis = analyzeCodexOutputLines(fullLines);
+
+      if (latestSession?.lastActivityAt) {
+        const activityAt = Date.parse(latestSession.lastActivityAt);
+        if (Number.isFinite(activityAt) && activityAt > lastObservedActivityAt) {
+          lastObservedActivityAt = activityAt;
+        }
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      const idleForMs = Date.now() - lastObservedActivityAt;
+      const isActive = isSessionExecutionStatus(latestSession?.status);
+      const requireExit = requiresProcessExitForWait(latestSession ?? session);
+
+      if (!isActive) {
+        status = fullAnalysis.hasMeaningfulOutput ? "settled" : "session_exited";
+        break;
+      }
+
+      if (!requireExit && fullAnalysis.hasMeaningfulOutput && idleForMs >= idleMs) {
+        status = "settled";
+        break;
+      }
+
+      if (elapsedMs >= timeoutMs) {
+        status = "timeout";
+        break;
+      }
+
+      await delay(pollMs);
+    }
+
+    latestSession = this.sessionRepository.getSession(session.sessionId);
+    latestCursor = this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0;
+    const elapsedMs = Date.now() - startedAt;
+    const fullLines =
+      this.sessionRepository.getScreen(session.sessionId, {
+        limit: this.config.runtime.maxBufferedLines,
+        afterSequence: afterCursor
+      }) ?? [];
+    fullAnalysis = analyzeCodexOutputLines(fullLines);
+    const lines =
+      this.sessionRepository.getScreen(session.sessionId, {
+        limit: lineLimit,
+        afterSequence: afterCursor
+      }) ?? [];
+    const completionState =
+      fullAnalysis.hasMeaningfulOutput && status === "settled"
+        ? "assistant_answer_detected"
+        : fullAnalysis.uiOnlyActivity
+          ? "ui_only_activity"
+          : fullLines.length > 0
+            ? "output_detected_without_answer"
+            : "no_new_output";
+
+    return {
+      actionId: "wait",
+      summary: `Wait for ${session.sessionId} finished with status ${status} (${completionState}).`,
+      sessionId: session.sessionId,
+      sessionStatus: latestSession?.status ?? null,
+      afterCursor,
+      latestCursor,
+      status,
+      completionState,
+      elapsedMs,
+      idleMs,
+      timeoutMs,
+      pollMs,
+      meaningfulLineCount: fullAnalysis.meaningfulLineCount,
+      assistantLines: fullAnalysis.assistantLines.map((entry) => entry.normalizedLine),
+      assistantText: fullAnalysis.assistantText,
+      uiOnlyActivity: fullAnalysis.uiOnlyActivity,
+      classifications: fullAnalysis.lines.map((entry) => ({
+        seq: entry.seq,
+        kind: entry.kind,
+        meaningful: entry.meaningful,
+        normalizedLine: entry.normalizedLine
+      })),
+      lines,
+      rendered: lines.map((entry) => `[${entry.stream}] ${entry.line}`).join("\n")
+    };
+  }
+
+  async #handleKill(args, message) {
+    const session = this.#requireSession(args, message);
+    const result = await this.codexAdapter.killSession({ session });
+    this.sessionRepository.markKilled(session.sessionId);
+    this.#clearBindingsForSession(session.sessionId);
+    const snapshot = this.sessionRepository.getSession(session.sessionId);
+    const shutdownEvaluation = await this.#evaluateArmedShutdown();
+
+    return {
+      actionId: "kill",
+      summary: result.summary,
+      session: snapshot,
+      shutdownEvaluation
+    };
+  }
+
+  async #handleEnablePermission(args, message) {
+    const session = this.#requireSession(args, message);
+    this.sessionRepository.setPermissionMode(session.sessionId, "auto");
+
+    if (typeof this.codexAdapter.enablePermission === "function") {
+      await this.codexAdapter.enablePermission({ session });
+    }
+
+    return {
+      actionId: "enablePermission",
+      summary: `Session ${session.sessionId} permission mode switched to auto.`,
+      session: this.sessionRepository.getSession(session.sessionId)
+    };
+  }
+
+  async #handleSystemProbe() {
+    return this.systemAdapter.getSystemStatus({
+      sessions: this.sessionRepository.listSessions()
+    });
+  }
+
+  async #handleShutdown(args) {
+    const activeSessions = this.sessionRepository.listActiveSessions();
+
+    if (typeof args.a === "string") {
+      const result = await this.systemAdapter.armShutdown({
+        activeSessionCount: activeSessions.length
+      });
+      const shutdownEvaluation = await this.#evaluateArmedShutdown();
+
+      return {
+        ...result,
+        shutdownEvaluation
+      };
+    }
+
+    for (const session of activeSessions) {
+      await this.codexAdapter.killSession({ session });
+      this.sessionRepository.markKilled(session.sessionId);
+      this.#clearBindingsForSession(session.sessionId);
+    }
+
+    return this.systemAdapter.shutdownNow({
+      activeSessionCount: activeSessions.length
+    });
+  }
+
+  async #handleCancelShutdown() {
+    return this.systemAdapter.cancelShutdown();
+  }
+
+  async #resolveSendSession(args, message) {
+    const targetRef = requireStringFlag(
+      args,
+      "n",
+      "The -n flag is required and must reference a managed session id or local Codex conversation id."
+    );
+    const numberedSelection = this.#resolveNumberedSelection(targetRef, message?.sourceId);
+    const resolvedTargetRef = numberedSelection
+      ? numberedSelection.type === "managed"
+        ? numberedSelection.sessionId
+        : numberedSelection.codexSessionId
+      : targetRef;
+    const managedSession = this.sessionRepository.getSession(resolvedTargetRef);
+
+    if (managedSession) {
+      return managedSession;
+    }
+
+    const reusableAttachedSession = this.sessionRepository
+      .listSessions()
+      .find(
+        (session) =>
+          session.codexThreadId === resolvedTargetRef &&
+          isSessionAvailableStatus(session.status)
+      );
+
+    if (reusableAttachedSession) {
+      return reusableAttachedSession;
+    }
+
+    const localListing =
+      typeof this.codexAdapter.listLocalSessions === "function"
+        ? await this.codexAdapter.listLocalSessions()
+        : { conversations: [] };
+    const localConversation = Array.isArray(localListing?.conversations)
+      ? localListing.conversations.find(
+          (conversation) => conversation.codexSessionId === resolvedTargetRef
+        )
+      : null;
+
+    if (!localConversation) {
+      throw new ContextResolutionError(
+        isLogicalSessionId(targetRef)
+          ? `Unknown session "${targetRef}".`
+          : `Unknown session or local Codex conversation "${targetRef}". Run /list first and use a displayed session id or Codex conversation id.`,
+        "session_unknown",
+        { sessionId: targetRef }
+      );
+    }
+
+    const explicitWorkspaceRef =
+      typeof args.w === "string" && args.w.trim() !== ""
+        ? args.w.trim()
+        : null;
+    const activeBindingSessionId =
+      this.sourceBindingRepository.getBinding(message?.sourceId)?.sessionId ?? null;
+    const activeBindingSession = activeBindingSessionId
+      ? this.sessionRepository.getSession(activeBindingSessionId)
+      : null;
+    const fallbackManagedSessions = this.sessionRepository.listSessions();
+    const seedSession = explicitWorkspaceRef
+      ? null
+      : activeBindingSession ??
+        (fallbackManagedSessions.length === 1 ? fallbackManagedSessions[0] : null);
+
+    let context;
+    if (explicitWorkspaceRef) {
+      context = this.contextResolver.resolveProject({
+        workspaceRef: explicitWorkspaceRef,
+        launchMode: this.config.runtime.defaultLaunchMode
+      });
+    } else if (seedSession) {
+      context = {
+        workspaceAlias: seedSession.workspaceAlias ?? null,
+        projectName: seedSession.projectName,
+        projectRoot: seedSession.projectRoot,
+        defaultFile: seedSession.defaultFile ?? null,
+        launchMode: seedSession.launchMode ?? this.config.runtime.defaultLaunchMode
+      };
+    } else {
+      throw new ContextResolutionError(
+        `Codex conversation "${resolvedTargetRef}" is available locally, but no project workspace is currently selected. Create/select a project session first, or resend with /send -n ${targetRef} -w <projectPath> -m <prompt>.`,
+        "workspace_missing_for_codex_conversation",
+        { sessionId: targetRef }
+      );
+    }
+
+    const sessionId = this.sessionRepository.nextSessionId();
+    return this.sessionRepository.createSession({
+      sessionId,
+      ...context,
+      permissionMode: this.config.runtime.defaultPermissionMode,
+      driver: "exec-json",
+      codexThreadId: resolvedTargetRef,
+      codexResumeMode: null,
+      status: "ready"
+    });
+  }
+
+  #requireSession(args, message) {
+    const targetRef = requireStringFlag(
+      args,
+      "n",
+      "The -n flag is required and must reference a session id."
+    );
+    const numberedSelection = this.#resolveNumberedSelection(targetRef, message?.sourceId);
+
+    if (numberedSelection) {
+      if (numberedSelection.type === "local") {
+        throw new ContextResolutionError(
+          `Selection "${targetRef}" points to local Codex history, not a live managed session. Use /send -n ${targetRef} -m <prompt> to resume it first.`,
+          "session_unknown",
+          { sessionId: targetRef, selectionType: "local" }
+        );
+      }
+
+      const selectedSession = this.sessionRepository.getSession(numberedSelection.sessionId);
+      if (!selectedSession) {
+        throw new ContextResolutionError(
+          `Selection "${targetRef}" is no longer available. Run /list again.`,
+          "session_unknown",
+          { sessionId: targetRef, selectionType: "managed" }
+        );
+      }
+
+      return selectedSession;
+    }
+
+    const session = this.sessionRepository.getSession(targetRef);
+
+    if (!session) {
+      throw new ContextResolutionError(
+        `Unknown session "${targetRef}".`,
+        "session_unknown",
+        { sessionId: targetRef }
+      );
+    }
+
+    return session;
+  }
+
+  #appendAdapterOutput(sessionId, output, stream) {
+    const lines = Array.isArray(output) ? output : [output];
+    for (const line of lines) {
+      this.sessionRepository.appendOutput(sessionId, {
+        stream,
+        content: line
+      });
+    }
+  }
+
+  #sessionHooks(sessionId) {
+    return {
+      onOutput: ({ stream, content }) => {
+        this.sessionRepository.appendOutput(sessionId, { stream, content });
+      },
+      onMetadata: (metadata = {}) => {
+        if (!this.sessionRepository.getSession(sessionId)) {
+          return;
+        }
+
+        this.sessionRepository.updateSession(sessionId, metadata);
+      },
+      onExit: ({
+        exitCode,
+        signal,
+        nextStatus = "exited",
+        preserveBinding = false,
+        metadata = {}
+      }) => {
+        const currentSession = this.sessionRepository.getSession(sessionId);
+        if (!currentSession) {
+          return;
+        }
+
+        if (nextStatus === "ready") {
+          if (currentSession.status !== "killed") {
+            this.sessionRepository.markReady(sessionId, {
+              exitCode,
+              signal,
+              ...metadata
+            });
+          }
+        } else {
+          this.sessionRepository.markExited(sessionId, {
+            exitCode,
+            signal,
+            status: nextStatus,
+            ...metadata
+          });
+        }
+
+        if (!preserveBinding) {
+          this.#clearBindingsForSession(sessionId);
+        }
+
+        if (nextStatus !== "ready") {
+          void this.notifier.send({
+            taskId: null,
+            phase: "session.exited",
+            sourceId: "system",
+            message: `Session ${sessionId} exited with code ${exitCode ?? "null"}${
+              signal ? ` and signal ${signal}` : ""
+            }.`
+          });
+        }
+
+        void this.#evaluateArmedShutdown();
+      }
+    };
+  }
+
+  async #evaluateArmedShutdown() {
+    const result = await this.systemAdapter.executeArmedShutdownIfReady({
+      activeSessionCount: this.sessionRepository.listActiveSessions().length
+    });
+
+    if (result) {
+      await this.notifier.send({
+        taskId: null,
+        phase: "system.shutdown.ready",
+        sourceId: "system",
+        message: result.summary
+      });
+    }
+
+    return result;
+  }
+
+  #adapterLabelForCommand(commandKey) {
+    if (["sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
+      return "system";
+    }
+
+    return "codex";
+  }
+
+  #notificationsForTask(taskId) {
+    return this.notifier.list().filter((notification) => notification.taskId === taskId);
+  }
+}
+
+export function createDefaultAgent(overrides = {}) {
+  return new AutomationAgent(overrides);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

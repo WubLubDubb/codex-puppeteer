@@ -1,0 +1,18 @@
+{
+  "name": "codex-puppeteer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local chat-driven Codex automation workflows for personal and managed use.",
+  "scripts": {
+    "test": "node tests/run-tests.js",
+    "demo": "node src/cli.js",
+    "wecom:server": "node src/wecom-entry.js",
+    "tg:bot": "node src/telegram-entry.js",
+    "service": "node src/service-entry.js",
+    "repl": "node src/repl.js"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0"
+  }
+}
