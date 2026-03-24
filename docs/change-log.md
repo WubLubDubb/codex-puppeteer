@@ -20,6 +20,7 @@
 - 补充测试：`tests/message-parser.test.js` 与 `tests/automation-agent.test.js`
 - 同步回写 `README.md`、`docs/requirements.md`、`docs/system-design.md`、`docs/development-plan.md`、`docs/acceptance-report.md`、`.agent/current-state.md`、`.agent/traceability.md`
 - 最新自动化验证：`npm test` => `85/85`
+- Git 发布：`0c083ea` 已成功推送到 `origin/main`
 
 ### 2026-03-24 近期基线能力
 
@@ -46,3 +47,4 @@
 - `docs/dev-logs/2026/2026-03-25.md`
 - `docs/dev-logs/2026/2026-03-24.md`
 - 历史阶段验收：`docs/acceptance-reports/`
+
