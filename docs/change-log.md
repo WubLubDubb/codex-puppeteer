@@ -2,29 +2,32 @@
 
 ## 当前状态
 
-- 当前主线已经统一为：`Telegram` 远程控制 `Codex CLI` 会话，`Windows` 为主要交付平台。
-- `/send` 负责发送 prompt 并自动等待当前轮回复，默认内部等待窗口为 `3600000ms`，即 1 小时。
-- `/send` 在开始执行后会立即单独返回一条推荐的 `/screen` 指令，最终完成消息只保留结果本身，减少 Telegram 长消息噪音。
-- `/list` 已统一展示托管会话和本机可恢复的 Codex 历史会话，并支持编号选择；`/activate` 可切换当前聊天绑定的活动会话。
-- 会话、任务、来源绑定支持本地持久化；服务重启时会执行恢复与未完成任务中断标记。
-- 高风险系统动作支持适配层与真实执行模式，但当前交付重点仍然是远程控制主链路，而不是关机联动。
+- 当前主线已经统一为：`Telegram` 远程控制 `Codex CLI` 会话，`Windows` 为主要交付平台
+- `/help` 已上线，可根据当前运行配置展示真实命令、允许根目录、等待时长、执行档位和系统模式
+- `/send` 负责发送 prompt 并自动等待当前轮回复，默认内部等待窗口为 `3600000ms`，即 1 小时
+- `/send` 在开始执行后会立即单独返回一条推荐的 `/screen` 指令，最终完成消息只保留结果本身，减少 Telegram 长消息噪音
+- `/list` 已统一展示托管会话和本机可恢复的 Codex 历史会话，并支持编号选择；`/activate` 可切换当前聊天绑定的活动会话
+- 远程放行策略已配置化：`safe`、`full-auto`、`dangerous`，并支持可选 sandbox 覆盖；`/enablePermission` 会影响后续 `codex exec` 调用
+- 会话、任务、来源绑定支持本地持久化；服务重启时会执行恢复与未完成任务中断标记
+- 高风险系统动作支持适配层与真实执行模式，但当前交付重点仍然是远程控制主链路，而不是关机联动
 
 ## 最近完成
 
-### 2026-03-24 文档与交互同步
+### 2026-03-25 `/help` 指令与文档同步
 
-- 将核心文档统一回写为当前代码口径，修复旧版需求、设计、计划、验收文档中的乱码与过期描述。
-- 将 `/send` 的推荐 `/screen` 指令调整为即时单独通知，并把默认等待窗口提升到 `3600000ms`。
-- 同步更新 `README.md`、`.env.example`、`.agent/current-state.md` 与当日日志。
-- 最新自动化验证：`npm test` => `81/81`。
+- 在 `src/automation-agent.js` 中接入 `/help` 命令分发、运行时帮助文本生成和返回格式化
+- 帮助文本已对齐当前实际运行配置：允许根目录、默认等待时间、权限模式、执行档位、sandbox 与系统模式
+- 补充测试：`tests/message-parser.test.js` 与 `tests/automation-agent.test.js`
+- 同步回写 `README.md`、`docs/requirements.md`、`docs/system-design.md`、`docs/development-plan.md`、`docs/acceptance-report.md`、`.agent/current-state.md`、`.agent/traceability.md`
+- 最新自动化验证：`npm test` => `85/85`
 
-### 2026-03-24 近期已完成能力
+### 2026-03-24 近期基线能力
 
-- `/activate -n <sessionId|listNumber>`：切换当前聊天绑定的活动会话。
-- `/list -a`、`/list -c <count>`：展开本机 Codex 历史会话；可见条目支持编号操作。
-- `/projects`：列出允许根目录下的首层项目目录，减少 `/create` 的手输路径成本。
-- `/send -n <codexConversationId>`：直接向本机历史 Codex 对话续聊，必要时自动补建托管会话。
-- Telegram 运行时已接入文件持久化和启动恢复；WeCom 入口仍保留为可选兼容模块。
+- `/activate -n <sessionId|listNumber>`：切换当前聊天绑定的活动会话
+- `/list -a`、`/list -c <count>`：展开本机 Codex 历史会话；可见条目支持编号操作
+- `/projects`：列出允许根目录下的首层项目目录，减少 `/create` 的手输路径成本
+- `/send -n <codexConversationId>`：直接向本机历史 Codex 对话续聊，必要时自动补建托管会话
+- Telegram 运行时已接入文件持久化和启动恢复；WeCom 入口仍保留为可选兼容模块
 
 ## 关键文件入口
 
@@ -33,12 +36,13 @@
 - 开发计划：`docs/development-plan.md`
 - 验收报告：`docs/acceptance-report.md`
 - 当前状态摘要：`.agent/current-state.md`
-- 当日日志：`docs/dev-logs/2026/2026-03-24.md`
+- 当日日志：`docs/dev-logs/2026/2026-03-25.md`
 - 核心编排：`src/automation-agent.js`
 - Codex 驱动：`src/codex-adapter.js`
 - Telegram 入口：`src/telegram-entry.js`
 
 ## 日志索引
 
-- [2026-03-24 开发日志](/f:/Project/codex-puppeteer/docs/dev-logs/2026/2026-03-24.md)
+- `docs/dev-logs/2026/2026-03-25.md`
+- `docs/dev-logs/2026/2026-03-24.md`
 - 历史阶段验收：`docs/acceptance-reports/`

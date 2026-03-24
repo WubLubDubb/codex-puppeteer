@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 
 import { WeChatCommandParser } from "../src/message-parser.js";
 
@@ -67,6 +67,13 @@ export async function runMessageParserTests(runCase) {
       c: "12"
     });
   });
+  await runCase("parses help commands without flags", () => {
+    const parser = new WeChatCommandParser();
+    const parsed = parser.parse("/help");
+
+    assert.equal(parsed.commandKey, "help");
+    assert.deepEqual(parsed.args, {});
+  });
   await runCase("rejects arguments that are not provided as flags", () => {
     const parser = new WeChatCommandParser();
 
@@ -76,4 +83,5 @@ export async function runMessageParserTests(runCase) {
     );
   });
 }
+
 

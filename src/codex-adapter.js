@@ -5,6 +5,57 @@ import * as pty from "node-pty";
 
 import { AdapterExecutionError, ConfigurationError } from "./errors.js";
 
+const supportedExecProfiles = new Set(["safe", "full-auto", "dangerous"]);
+const supportedSandboxModes = new Set(["read-only", "workspace-write", "danger-full-access"]);
+
+function normalizePermissionMode(value) {
+  return String(value ?? "").trim().toLowerCase() === "auto" ? "auto" : "manual";
+}
+
+function resolveExecProfile(value, { fallback = "safe", optionName = "exec profile" } = {}) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (supportedExecProfiles.has(normalized)) {
+    return normalized;
+  }
+
+  throw new ConfigurationError(
+    `Unsupported ${optionName} value "${value}".`,
+    "codex_exec_profile_invalid",
+    { optionName, value }
+  );
+}
+
+function resolveSandboxMode(value, { fallback = null } = {}) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (supportedSandboxModes.has(normalized)) {
+    return normalized;
+  }
+
+  throw new ConfigurationError(
+    `Unsupported CODEX_PUPPETEER_CODEX_SANDBOX value "${value}".`,
+    "codex_sandbox_mode_invalid",
+    { value }
+  );
+}
+
+function describeExecStrategy({ execProfile, sandboxMode }) {
+  if (execProfile === "dangerous") {
+    return "dangerous (bypass approvals and sandbox)";
+  }
+
+  return sandboxMode ? `${execProfile}, sandbox=${sandboxMode}` : execProfile;
+}
+
 function ensurePrompt(prompt) {
   if (typeof prompt !== "string" || prompt.trim() === "") {
     throw new AdapterExecutionError(
@@ -426,13 +477,28 @@ export class ExecCodexAdapter {
     env = process.env,
     platform = process.platform,
     spawnFactory = spawn,
-    execArgs = ["--skip-git-repo-check"]
+    execArgs = ["--skip-git-repo-check"],
+    defaultExecProfile,
+    autoPermissionExecProfile,
+    sandboxMode
   } = {}) {
     this.command = command;
     this.env = env;
     this.platform = platform;
     this.spawnFactory = spawnFactory;
     this.execArgs = execArgs;
+    this.defaultExecProfile = resolveExecProfile(
+      defaultExecProfile ?? env.CODEX_PUPPETEER_CODEX_EXEC_PROFILE,
+      { fallback: "safe", optionName: "CODEX_PUPPETEER_CODEX_EXEC_PROFILE" }
+    );
+    this.autoPermissionExecProfile = resolveExecProfile(
+      autoPermissionExecProfile ?? env.CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE,
+      { fallback: "full-auto", optionName: "CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE" }
+    );
+    this.sandboxMode = resolveSandboxMode(
+      sandboxMode ?? env.CODEX_PUPPETEER_CODEX_SANDBOX,
+      { fallback: null }
+    );
     this.sessions = new Map();
   }
 
@@ -483,10 +549,12 @@ export class ExecCodexAdapter {
       );
     }
 
+    const executionStrategy = this.#resolveExecutionStrategy(session);
     const codexArgs = this.#buildExecArgs({
       prompt,
       threadId: session.codexThreadId ?? null,
-      resumeMode: session.codexResumeMode ?? null
+      resumeMode: session.codexResumeMode ?? null,
+      permissionMode: executionStrategy.permissionMode
     });
     const spawnSpec = buildSpawnSpec({
       command: this.command,
@@ -535,7 +603,10 @@ export class ExecCodexAdapter {
       summary: `Prompt sent to session ${session.sessionId}.`,
       pid: child.pid ?? null,
       driver: "exec-json",
-      sessionStatus: "running"
+      sessionStatus: "running",
+      permissionMode: executionStrategy.permissionMode,
+      executionProfile: executionStrategy.execProfile,
+      sandboxMode: executionStrategy.sandboxMode
     };
   }
 
@@ -566,9 +637,17 @@ export class ExecCodexAdapter {
   }
 
   async enablePermission({ session }) {
+    const executionStrategy = this.#resolveExecutionStrategy({
+      ...session,
+      permissionMode: "auto"
+    });
+
     return {
       actionId: "enablePermission",
-      summary: `Permission mode switched for session ${session.sessionId}.`
+      summary: `Permission mode switched for session ${session.sessionId}. Next runs will use ${describeExecStrategy(executionStrategy)}.`,
+      permissionMode: executionStrategy.permissionMode,
+      executionProfile: executionStrategy.execProfile,
+      sandboxMode: executionStrategy.sandboxMode
     };
   }
 
@@ -583,7 +662,19 @@ export class ExecCodexAdapter {
     };
   }
 
-  #buildExecArgs({ prompt, threadId, resumeMode }) {
+  #resolveExecutionStrategy(session) {
+    const permissionMode = normalizePermissionMode(session?.permissionMode);
+    const execProfile =
+      permissionMode === "auto" ? this.autoPermissionExecProfile : this.defaultExecProfile;
+
+    return {
+      permissionMode,
+      execProfile,
+      sandboxMode: execProfile === "dangerous" ? null : this.sandboxMode
+    };
+  }
+
+  #buildExecArgs({ prompt, threadId, resumeMode, permissionMode }) {
     const args = ["exec"];
 
     if (resumeMode === "last") {
@@ -592,7 +683,20 @@ export class ExecCodexAdapter {
       args.push("resume", threadId);
     }
 
-    args.push("--json", prompt, ...this.execArgs);
+    const executionStrategy = this.#resolveExecutionStrategy({ permissionMode });
+    args.push("--json");
+
+    if (executionStrategy.execProfile === "full-auto") {
+      args.push("--full-auto");
+    } else if (executionStrategy.execProfile === "dangerous") {
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+    }
+
+    if (executionStrategy.sandboxMode) {
+      args.push("--sandbox", executionStrategy.sandboxMode);
+    }
+
+    args.push(prompt, ...this.execArgs);
     return args;
   }
 

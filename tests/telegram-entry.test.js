@@ -125,6 +125,10 @@ export async function runTelegramEntryTests(runCase) {
         TG_TRANSPORT: "powershell",
         CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS: "F:/project,D:/workspace",
         CODEX_PUPPETEER_STORAGE_DIR: `${tempDir}/runtime`,
+        CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE: "auto",
+        CODEX_PUPPETEER_CODEX_EXEC_PROFILE: "safe",
+        CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE: "dangerous",
+        CODEX_PUPPETEER_CODEX_SANDBOX: "danger-full-access",
         CODEX_PUPPETEER_WAIT_TIMEOUT_MS: "180000",
         CODEX_PUPPETEER_SEND_WAIT_TIMEOUT_MS: "480000"
       }
@@ -140,6 +144,10 @@ export async function runTelegramEntryTests(runCase) {
     assert.equal(config.telegram.commandDispatchMode, "sync");
     assert.equal(config.telegram.maxMessageLength, 3800);
     assert.equal(config.telegram.transport, "powershell");
+    assert.equal(config.runtime.defaultPermissionMode, "auto");
+    assert.equal(config.runtime.defaultExecProfile, "safe");
+    assert.equal(config.runtime.autoPermissionExecProfile, "dangerous");
+    assert.equal(config.runtime.codexSandboxMode, "danger-full-access");
     assert.equal(config.runtime.defaultWaitTimeoutMs, 180000);
     assert.equal(config.runtime.defaultSendWaitTimeoutMs, 480000);
     assert.match(config.runtime.sessionsFilePath, /sessions\.json$/);

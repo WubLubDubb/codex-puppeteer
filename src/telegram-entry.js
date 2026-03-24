@@ -55,6 +55,27 @@ function resolveTransport(value, fallback = "auto") {
   return ["auto", "fetch", "powershell"].includes(normalized) ? normalized : fallback;
 }
 
+function resolvePermissionMode(value, fallback = "manual") {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  return normalized === "auto" ? "auto" : "manual";
+}
+
+function resolveExecProfile(value, fallback = "safe") {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  return ["safe", "full-auto", "dangerous"].includes(normalized) ? normalized : fallback;
+}
+
+function resolveSandboxMode(value, fallback = null) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  return ["read-only", "workspace-write", "danger-full-access"].includes(normalized)
+    ? normalized
+    : fallback;
+}
+
 export function createTelegramRuntimeConfigFromEnv({
   env = process.env,
   cwd = process.cwd(),
@@ -83,6 +104,22 @@ export function createTelegramRuntimeConfigFromEnv({
     runtime: {
       ...baseConfig.runtime,
       storageDir,
+      defaultPermissionMode: resolvePermissionMode(
+        env.CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE,
+        baseConfig.runtime.defaultPermissionMode || "manual"
+      ),
+      defaultExecProfile: resolveExecProfile(
+        env.CODEX_PUPPETEER_CODEX_EXEC_PROFILE,
+        baseConfig.runtime.defaultExecProfile || "safe"
+      ),
+      autoPermissionExecProfile: resolveExecProfile(
+        env.CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE,
+        baseConfig.runtime.autoPermissionExecProfile || "full-auto"
+      ),
+      codexSandboxMode: resolveSandboxMode(
+        env.CODEX_PUPPETEER_CODEX_SANDBOX,
+        baseConfig.runtime.codexSandboxMode ?? null
+      ),
       defaultWaitTimeoutMs: resolvePositiveInteger(
         env.CODEX_PUPPETEER_WAIT_TIMEOUT_MS,
         baseConfig.runtime.defaultWaitTimeoutMs || 120000

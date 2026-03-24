@@ -1,55 +1,72 @@
-# codex-puppeteer
+﻿# codex-puppeteer
 
-## Overview
+## 项目定位
 
-codex-puppeteer is a personal remote-control agent for Codex CLI.
-The current primary workflow is:
+`codex-puppeteer` 是一个面向个人使用的远程控制代理，当前主线是：通过 Telegram Bot 远程控制本机的 `Codex CLI` 会话。
 
-- receive commands from Telegram Bot
-- run Codex CLI inside a selected project directory
-- keep logical sessions with persistence
-- continue existing conversations, inspect output, and read project files
+它解决的问题不是 VS Code GUI 自动化，也不是点击编辑器里的发送按钮，而是把你平时这套人工流程远程化：
 
-This project is not a VS Code GUI automation tool.
-The primary execution target is Codex CLI.
+1. 进入某个项目根目录
+2. 启动或接上一个 Codex 会话
+3. 发送 prompt
+4. 等待当前轮输出
+5. 在手机端继续追踪、切换、续聊
 
-## Current capabilities
+## 当前主流程
 
-- Telegram as the main remote entry
-- /send waits for the current reply automatically and sends a separate screen hint immediately
-- /screen inspects buffered and incremental output
-- /projects lists first-level project folders under allowed roots
-- /attach and /attach-last resume existing Codex conversations
-- persisted sessions, tasks, and source bindings
-- Windows-first validation
+1. 在 Telegram 里发送 `/help`
+2. 发送 `/projects`
+3. 发送 `/create -n MyTask -w F:\project\YourProject`
+4. 发送 `/send -n session-0001 -m "请先扫描项目并总结目录结构"`
+5. 后续可以直接发送普通文本续聊；如果要切换项目，先执行 `/activate`
 
-## Quick start
+## 当前能力
 
-1. Install dependencies: `npm install`
-2. Fill `.env` from `.env.example`
-3. Set at least these values:
+- `/help`：按当前运行配置输出实际可用命令、默认行为与关键参数
+- `/projects`：列出允许根目录下的首层项目目录
+- `/create`：创建新的逻辑 Codex 会话
+- `/list`：同时展示托管会话和本机 Codex 历史对话，并生成编号
+- `/activate`：切换当前聊天绑定的活动会话
+- `/send`：支持 `sessionId`、`/list` 编号或本机 `codexConversationId`，并自动等待当前轮结果
+- 普通文本续聊：直接发给当前活动会话
+- `/screen`：查看当前输出或按 cursor 查看增量输出
+- `/read`：读取绑定项目内文件
+- `/attach -i ...`、`/attach -last ...`：显式接入历史对话
+- `/enablePermission`：把会话切到 auto 执行档，适合需要自动放行的任务
+- `/kill`：终止指定会话
+- `/sys`：查看宿主机摘要
+- 会话、任务、来源绑定持久化与重启恢复
+- `safe`、`full-auto`、`dangerous` 三档执行策略
+- Windows 为当前主要验证平台
+
+## 快速开始
+
+1. 安装依赖：`npm install`
+2. 复制并填写 `.env`
+3. 至少配置以下参数：
    - `TG_BOT_TOKEN`
    - `TG_ALLOWED_CHAT_IDS`
    - `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
-4. Start the Telegram bot runtime: `npm run tg:bot`
-5. Send commands from Telegram
+4. 确认本机可以在命令行直接执行 `codex`
+5. 启动运行时：`npm run tg:bot`
+6. 在 Telegram 中发送 `/help`
 
-## Common commands
+## 常用命令
 
+- `/help`
 - `/projects`
-- `/projects -w F:\project`
-- `/create -n DemoProject -w F:\project\demo`
-- `/attach -last -w F:\project\demo -n DemoProject`
-- `/attach -i <codex_session_id> -w F:\project\demo -n DemoProject`
-- `/send -n session-0001 -m "Scan this project and summarize the structure"`
-- `/screen -n session-0001`
-- `/activate -n session-0002`
-- `/read -n session-0001 -f README.md`
+- `/create -n MyTask -w F:\project\YourProject`
 - `/list`
+- `/activate -n 1`
+- `/send -n session-0001 -m "请先扫描项目并总结目录结构"`
+- `/screen -n session-0001`
+- `/read -n session-0001 -f README.md`
+- `/attach -last -w F:\project\YourProject -n ResumeTask`
+- `/enablePermission -n session-0001`
 - `/kill -n session-0001`
 - `/sys`
 
-## Scripts
+## 常用脚本
 
 - `npm test`
 - `npm run tg:bot`
@@ -57,29 +74,35 @@ The primary execution target is Codex CLI.
 - `npm run service`
 - `npm run wecom:server`
 
-## Key configuration
+## 关键配置
 
-See `.env.example` for the full list.
-Common values:
+完整参数见 `.env.example`。
+
+常用项：
 
 - `TG_BOT_TOKEN`
 - `TG_ALLOWED_CHAT_IDS`
 - `TG_DEFAULT_CHAT_ID`
 - `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
+- `CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE`
+- `CODEX_PUPPETEER_CODEX_EXEC_PROFILE`
+- `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`
+- `CODEX_PUPPETEER_CODEX_SANDBOX`
 - `CODEX_PUPPETEER_STORAGE_DIR`
 - `CODEX_PUPPETEER_LOG_DIR`
 - `CODEX_PUPPETEER_WAIT_TIMEOUT_MS`
 - `CODEX_PUPPETEER_SEND_WAIT_TIMEOUT_MS`
 - `CODEX_PUPPETEER_SYSTEM_MODE`
 
-## Validation status
+## 当前验证状态
 
-- main remote-control workflow is available
-- latest automated verification: `npm test` => `81/81`
-- Windows is the current primary validation platform
-- high-risk system actions remain dry-run by default
+- 主远程控制链路可用
+- 最新自动化验证：`npm test` => `85/85`
+- Windows 为当前主要验证平台
+- 高风险系统动作默认保持 `dry-run`
 
-## Notes
+## 说明
 
-- WeCom support still exists in code, but Telegram is the main personal-use path now.
-- If VS Code opened a file with the wrong encoding before, reopen the file with UTF-8 after refresh.
+- `/wait` 已退役，不再是推荐用户命令；当前主流程是 `/send` + `/screen`
+- 如果任务会卡在本地审批提示，先执行 `/enablePermission`，或调整 `.env` 中的执行档位配置
+- WeCom 入口仍保留在代码中，但个人使用主路径已经切到 Telegram

@@ -356,6 +356,77 @@ export async function runCodexAdapterTests(runCase) {
     assert.equal(outputs[2].content, "LAST_OK");
   });
 
+  await runCase("uses full-auto and sandbox flags when session permission mode is auto", async () => {
+    const invocations = [];
+
+    const adapter = new ExecCodexAdapter({
+      command: "codex",
+      env: {
+        CODEX_PUPPETEER_CODEX_EXEC_PROFILE: "safe",
+        CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE: "full-auto",
+        CODEX_PUPPETEER_CODEX_SANDBOX: "danger-full-access"
+      },
+      platform: "win32",
+      spawnFactory: (command, args, options) => {
+        invocations.push({ command, args, options });
+        return new FakeChildProcess();
+      }
+    });
+
+    await adapter.sendPrompt({
+      session: {
+        sessionId: "session-0100",
+        projectName: "demo",
+        projectRoot: "F:/Project/codex-puppeteer",
+        launchMode: "background",
+        permissionMode: "auto"
+      },
+      prompt: "Run npm test"
+    });
+
+    assert.deepEqual(invocations[0].args, [
+      "/d",
+      "/s",
+      "/c",
+      'codex exec --json --full-auto --sandbox danger-full-access "Run npm test" --skip-git-repo-check'
+    ]);
+  });
+
+  await runCase("uses dangerous bypass mode without sandbox flag when configured", async () => {
+    const invocations = [];
+
+    const adapter = new ExecCodexAdapter({
+      command: "codex",
+      env: {
+        CODEX_PUPPETEER_CODEX_EXEC_PROFILE: "dangerous",
+        CODEX_PUPPETEER_CODEX_SANDBOX: "workspace-write"
+      },
+      platform: "win32",
+      spawnFactory: (command, args, options) => {
+        invocations.push({ command, args, options });
+        return new FakeChildProcess();
+      }
+    });
+
+    await adapter.sendPrompt({
+      session: {
+        sessionId: "session-0101",
+        projectName: "demo",
+        projectRoot: "F:/Project/codex-puppeteer",
+        launchMode: "background",
+        permissionMode: "manual"
+      },
+      prompt: "Open network and continue"
+    });
+
+    assert.deepEqual(invocations[0].args, [
+      "/d",
+      "/s",
+      "/c",
+      'codex exec --json --dangerously-bypass-approvals-and-sandbox "Open network and continue" --skip-git-repo-check'
+    ]);
+  });
+
   await runCase("starts a shell-backed PTY session, writes prompts, and kills via process tree on Windows", async () => {
     const invocations = [];
     const outputs = [];

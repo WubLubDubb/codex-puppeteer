@@ -1,4 +1,4 @@
-import { createPreferredCodexAdapter } from "./codex-adapter.js";
+﻿import { createPreferredCodexAdapter } from "./codex-adapter.js";
 import { ProjectContextResolver } from "./context-resolver.js";
 import { defaultConfig } from "./default-config.js";
 import { analyzeCodexOutputLines } from "./output-analysis.js";
@@ -177,6 +177,94 @@ function formatLocalCodexConversationLine(conversation, selectionIndex = null) {
   ${updatedAt} | ${title}`;
 }
 
+function formatDisplayPath(targetPath) {
+  const normalized = String(targetPath ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return process.platform === "win32" ? normalized.replace(/\//g, "\\") : normalized.replace(/\\/g, "/");
+}
+
+function formatWaitMinutes(ms) {
+  const value = Number(ms ?? 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0";
+  }
+
+  return String(Math.max(1, Math.round(value / 60000)));
+}
+
+function buildHelpMessage(config) {
+  const allowedRoots = Array.isArray(config?.security?.allowedProjectRoots)
+    ? config.security.allowedProjectRoots.filter((entry) => String(entry ?? "").trim() !== "")
+    : [];
+  const firstRoot = allowedRoots[0]
+    ? formatDisplayPath(allowedRoots[0])
+    : process.platform === "win32"
+      ? "F:\\project"
+      : "~/project";
+  const separator = firstRoot.includes("\\") ? "\\" : "/";
+  const exampleWorkspace = `${firstRoot.replace(/[\\/]+$/, "")}${separator}YourProject`;
+  const screenLines = Number(config?.runtime?.defaultScreenLines ?? 20);
+  const sendWaitMinutes = formatWaitMinutes(config?.runtime?.defaultSendWaitTimeoutMs ?? 0);
+  const explicitWaitMinutes = formatWaitMinutes(config?.runtime?.defaultWaitTimeoutMs ?? 0);
+  const defaultPermissionMode = String(config?.runtime?.defaultPermissionMode ?? "manual");
+  const manualExecProfile = String(config?.runtime?.defaultExecProfile ?? "safe");
+  const autoExecProfile = String(config?.runtime?.autoPermissionExecProfile ?? "full-auto");
+  const sandboxMode = config?.runtime?.codexSandboxMode ? String(config.runtime.codexSandboxMode) : "default";
+  const systemMode = String(config?.system?.actionMode ?? "dry-run");
+
+  return [
+    "WxCodex Agent /help",
+    "",
+    "推荐主流程：",
+    "1. /projects",
+    `2. /create -n MyTask -w ${exampleWorkspace}`,
+    '3. /send -n session-0001 -m "请先扫描项目并总结目录结构"',
+    "4. 后续可直接发送普通文本续聊；切换会话时先用 /activate",
+    "",
+    "当前运行配置：",
+    ...(allowedRoots.length > 0
+      ? ["- 允许项目根目录：", ...allowedRoots.map((root) => `  - ${formatDisplayPath(root)}`)]
+      : ["- 允许项目根目录：未配置"]),
+    `- /send 默认等待：${sendWaitMinutes} 分钟`,
+    `- /screen 默认显示：${screenLines} 行`,
+    `- 显式补充查看超时：${explicitWaitMinutes} 分钟`,
+    `- 默认权限模式：${defaultPermissionMode}`,
+    `- manual 执行档：${manualExecProfile}`,
+    `- auto 执行档：${autoExecProfile}`,
+    `- sandbox：${sandboxMode}`,
+    `- 系统动作模式：${systemMode}`,
+    "",
+    "命令列表：",
+    "- /help：查看当前帮助",
+    "- /projects [-w <allowedRoot>]：列出允许根目录下的项目文件夹",
+    "- /create -n <name> -w <workspace>：创建新会话",
+    "- /list [-a] [-c <count>]：查看托管会话和本机 Codex 历史对话",
+    "- /activate -n <sessionId|listNumber>：切换当前聊天绑定的活动会话",
+    "- /send -n <sessionId|codexConversationId|listNumber> -m <prompt>：发送任务并自动等待当前轮结果",
+    "- 直接发送普通文本：发给当前活动会话",
+    "- /screen -n <sessionId|listNumber> [-c <cursor>]：查看当前输出或增量输出",
+    "- /read -n <sessionId|listNumber> -f <relativePath>：读取项目内文件",
+    "- /attach -i <codexSessionId> -w <workspace> [-n <name>]：接上指定历史对话",
+    "- /attach -last -w <workspace> [-n <name>]：接上最近一次历史对话",
+    "- /enablePermission -n <sessionId|listNumber>：把会话切到 auto 执行档，适合需要自动放行的任务",
+    "- /kill -n <sessionId|listNumber>：终止指定会话",
+    "- /sys：查看宿主机状态",
+    "- /shutdown -a <password>：等待所有活跃会话结束后关机",
+    "- /shutdown -p <password>：立即关机",
+    "- /cancel_shutdown：取消自动关机计划",
+    "",
+    "补充说明：",
+    "- /wait 已废弃，不需要再单独调用",
+    "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
+    "- 如果远程任务会卡在本地审批提示，先执行 /enablePermission，或者直接调整 .env 里的执行档位配置",
+    systemMode === "dry-run"
+      ? "- 当前 /shutdown 仍是 dry-run，仅模拟执行，不会真正关机"
+      : "- 当前 /shutdown 为 real 模式，使用前请确认风险"
+  ].join("\n");
+}
 function formatCommandResponseMessage(response) {
   if (!response || typeof response !== "object") {
     return "Command completed.";
@@ -254,6 +342,8 @@ function formatCommandResponseMessage(response) {
     }
     case "projects":
       return response.rendered ? truncateText(response.rendered) : response.summary;
+    case "help":
+      return response.rendered ? truncateText(response.rendered, 6000) : response.summary;
     case "send": {
       const sessionLabel = response.session?.sessionId ?? response.sessionId ?? "unknown";
       const hasSettledAssistantReply =
@@ -555,6 +645,8 @@ export class AutomationAgent {
         return this.#handleList(parsedCommand.args, message);
       case "projects":
         return this.#handleProjects(parsedCommand.args);
+      case "help":
+        return this.#handleHelp();
       case "activate":
         return this.#handleActivate(parsedCommand.args, message);
       case "send":
@@ -1005,6 +1097,14 @@ export class AutomationAgent {
     };
   }
 
+  #handleHelp() {
+    return {
+      actionId: "help",
+      summary: "显示当前系统帮助。",
+      rendered: buildHelpMessage(this.config)
+    };
+  }
+
   #handleDeprecatedWait() {
     throw new CommandValidationError(
       "The /wait command is no longer needed. /send now waits automatically; use /screen to inspect current output.",
@@ -1175,15 +1275,18 @@ export class AutomationAgent {
   async #handleEnablePermission(args, message) {
     const session = this.#requireSession(args, message);
     this.sessionRepository.setPermissionMode(session.sessionId, "auto");
-
-    if (typeof this.codexAdapter.enablePermission === "function") {
-      await this.codexAdapter.enablePermission({ session });
-    }
+    const updatedSession = this.sessionRepository.getSession(session.sessionId);
+    const adapterResult =
+      typeof this.codexAdapter.enablePermission === "function"
+        ? await this.codexAdapter.enablePermission({ session: updatedSession })
+        : null;
 
     return {
       actionId: "enablePermission",
-      summary: `Session ${session.sessionId} permission mode switched to auto.`,
-      session: this.sessionRepository.getSession(session.sessionId)
+      summary: adapterResult?.summary ?? `Session ${session.sessionId} permission mode switched to auto.`,
+      session: updatedSession,
+      executionProfile: adapterResult?.executionProfile ?? null,
+      sandboxMode: adapterResult?.sandboxMode ?? null
     };
   }
 
@@ -1453,7 +1556,7 @@ export class AutomationAgent {
   }
 
   #adapterLabelForCommand(commandKey) {
-    if (["sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
+    if (["help", "sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
       return "system";
     }
 
@@ -1468,6 +1571,7 @@ export class AutomationAgent {
 export function createDefaultAgent(overrides = {}) {
   return new AutomationAgent(overrides);
 }
+
 
 
 

@@ -13,6 +13,9 @@ export const defaultConfig = {
   runtime: {
     defaultLaunchMode: "background",
     defaultPermissionMode: "manual",
+    defaultExecProfile: "safe",
+    autoPermissionExecProfile: "full-auto",
+    codexSandboxMode: null,
     maxBufferedLines: 500,
     defaultScreenLines: 20,
     defaultWaitIdleMs: 3000,

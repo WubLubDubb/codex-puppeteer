@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -65,7 +65,8 @@ class ControlledCodexAdapter {
       sessionId: session.sessionId,
       prompt,
       resumedThreadId: session.codexThreadId ?? null,
-      resumeMode: session.codexResumeMode ?? null
+      resumeMode: session.codexResumeMode ?? null,
+      permissionMode: session.permissionMode ?? null
     });
 
     for (const step of this.outputPlan) {
@@ -145,6 +146,31 @@ export async function runAutomationAgentTests(runCase) {
       listResult.task.response.sessions[0].sessionId,
       createResult.task.response.session.sessionId
     );
+  });
+  await runCase("renders help text that matches the current runtime behavior", async () => {
+    const config = structuredClone(defaultConfig);
+    config.security.allowedProjectRoots = ["F:/project"];
+    config.runtime.defaultSendWaitTimeoutMs = 3600000;
+    config.runtime.defaultWaitTimeoutMs = 120000;
+    config.runtime.defaultPermissionMode = "manual";
+    config.runtime.defaultExecProfile = "safe";
+    config.runtime.autoPermissionExecProfile = "full-auto";
+    config.runtime.codexSandboxMode = "workspace-write";
+    config.system.actionMode = "dry-run";
+
+    const agent = createDefaultAgent({ config });
+    const result = await agent.receiveText(buildMessage('/help'));
+
+    assert.equal(result.ok, true);
+    assert.equal(result.task.response.actionId, "help");
+    assert.match(result.task.resultSummary, /WxCodex Agent \/help/);
+    assert.match(result.task.resultSummary, /\/projects/);
+    assert.match(result.task.resultSummary, /\/create -n <name> -w <workspace>/);
+    assert.match(result.task.resultSummary, /\/send -n <sessionId\|codexConversationId\|listNumber> -m <prompt>/);
+    assert.match(result.task.resultSummary, /F:\\project/);
+    assert.match(result.task.resultSummary, /60 分钟/);
+    assert.match(result.task.resultSummary, /workspace-write/);
+    assert.match(result.task.resultSummary, /\/wait 已废弃/);
   });
 
 
@@ -847,7 +873,20 @@ export async function runAutomationAgentTests(runCase) {
   });
 
   await runCase("updates permission mode and can kill a session", async () => {
-    const agent = createDefaultAgent();
+    const adapter = new ControlledCodexAdapter({
+      outputPlan: [
+        { afterMs: 20, exit: true, nextStatus: "ready", preserveBinding: true }
+      ]
+    });
+    const agent = createDefaultAgent({
+      config: buildAgentConfig({
+        defaultWaitIdleMs: 20,
+        defaultWaitTimeoutMs: 120,
+        defaultSendWaitTimeoutMs: 120,
+        defaultWaitPollMs: 10
+      }),
+      codexAdapter: adapter
+    });
     const createResult = await agent.receiveText(buildMessage('/create -n DemoProject -w demo'));
     const sessionId = createResult.task.response.session.sessionId;
 
@@ -857,6 +896,13 @@ export async function runAutomationAgentTests(runCase) {
 
     assert.equal(permissionResult.ok, true);
     assert.equal(permissionResult.task.response.session.permissionMode, "auto");
+
+    const sendResult = await agent.receiveText(
+      buildMessage(`/send -n ${sessionId} -m "Run with permission"`)
+    );
+
+    assert.equal(sendResult.ok, true);
+    assert.equal(adapter.sentPrompts.at(-1).permissionMode, "auto");
 
     const killResult = await agent.receiveText(buildMessage(`/kill -n ${sessionId}`));
 
@@ -903,6 +949,7 @@ export async function runAutomationAgentTests(runCase) {
     assert.ok(result.task.response.snapshot.activeSessions >= 0);
   });
 }
+
 
 
 
