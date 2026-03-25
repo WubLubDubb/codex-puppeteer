@@ -17,7 +17,7 @@
 - `/activate` 切换当前聊天绑定的活动会话
 - `/help` 按运行配置生成实际帮助文本
 - 会话、任务、来源绑定持久化与重启恢复
-- 执行档位切换与可选 sandbox 覆盖
+- Execution profile switching with optional sandbox override; the current remote default is `manual -> safe` and `auto -> dangerous`
 
 ## 仍在推进
 

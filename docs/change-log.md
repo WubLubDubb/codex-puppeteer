@@ -7,11 +7,19 @@
 - `/send` 负责发送 prompt 并自动等待当前轮回复，默认内部等待窗口为 `3600000ms`，即 1 小时
 - `/send` 在开始执行后会立即单独返回一条推荐的 `/screen` 指令，最终完成消息只保留结果本身，减少 Telegram 长消息噪音
 - `/list` 已统一展示托管会话和本机可恢复的 Codex 历史会话，并支持编号选择；`/activate` 可切换当前聊天绑定的活动会话
-- 远程放行策略已配置化：`safe`、`full-auto`、`dangerous`，并支持可选 sandbox 覆盖；`/enablePermission` 会影响后续 `codex exec` 调用
+- Remote permission strategy is configurable: `safe`, `full-auto`, and `dangerous`; the current default mapping is `manual -> safe` and `auto -> dangerous`, so `/enablePermission` now truly opens the remote-friendly path
 - 会话、任务、来源绑定支持本地持久化；服务重启时会执行恢复与未完成任务中断标记
 - 高风险系统动作支持适配层与真实执行模式，但当前交付重点仍然是远程控制主链路，而不是关机联动
 
 ## 最近完成
+
+### 2026-03-25 Remote Permission Default Fix
+
+- Root cause confirmed: `/enablePermission` only switched a session to `auto`, but the old default `auto -> full-auto` could still be blocked by sandbox/network restrictions.
+- Default runtime behavior is now aligned to real remote usage: `manual -> safe`, `auto -> dangerous`.
+- Latest automated verification for this fix: `npm test` => `86/86`.
+- The override path remains available through `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`, so a host can still opt back into `full-auto` later.
+
 
 ### 2026-03-25 `/help` 指令与文档同步
 

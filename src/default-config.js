@@ -14,7 +14,7 @@ export const defaultConfig = {
     defaultLaunchMode: "background",
     defaultPermissionMode: "manual",
     defaultExecProfile: "safe",
-    autoPermissionExecProfile: "full-auto",
+    autoPermissionExecProfile: "dangerous",
     codexSandboxMode: null,
     maxBufferedLines: 500,
     defaultScreenLines: 20,

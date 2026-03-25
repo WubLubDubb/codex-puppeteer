@@ -47,7 +47,7 @@
 - 支持 `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/kill`、`/sys` 等命令。
 - 支持会话、任务、来源绑定的本地持久化与重启恢复。
 - 支持 `exec-json`、`pty`、`pipe` 等驱动抽象，其中 `exec-json` 为当前主路径。
-- 支持通过执行档位处理远程审批场景：`safe`、`full-auto`、`dangerous`，并可选配置 sandbox。
+- Supports remote approval handling through execution profiles: `safe`, `full-auto`, and `dangerous`, with optional sandbox configuration; the current default maps `auto` to `dangerous` to reduce remote approval and network-sandbox blocking.
 - 保留系统联动与 WeCom 兼容入口，但不把它们作为当前主交付能力中心。
 
 ### 4.2 Out of Scope
@@ -73,7 +73,7 @@
 | 直接发送普通文本 | 发给当前聊天已绑定的活动会话 |
 | `/screen -n <sessionId|listNumber> [-c <cursor>]` | 查看会话输出或增量输出 |
 | `/read -n <sessionId|listNumber> -f <relativePath>` | 读取绑定项目内文件 |
-| `/enablePermission -n <sessionId|listNumber>` | 切换会话权限模式，并让后续执行进入 auto 档位 |
+| `/enablePermission -n <sessionId|listNumber>` | Switch the session to auto mode; the current default maps `auto` to `dangerous` |
 | `/disablePermission -n <sessionId|listNumber>` | 把会话切回 manual 档位，恢复默认执行策略 |
 | `/kill -n <sessionId|listNumber>` | 终止指定会话 |
 | `/sys` | 查看宿主机与运行时状态 |
@@ -120,7 +120,7 @@
 ### FR-005 权限放行与人工干预
 
 - 名称：支持会话权限切换与紧急终止
-- 描述：系统必须支持切换会话的权限模式，并在需要时终止指定会话，避免远程任务持续占用资源或进入不可控状态。由于远程链路无法人工点击本地 Codex 审批提示，因此 `/enablePermission` 必须通过配置化执行档位影响后续 `codex exec` 参数，而不是依赖交互弹窗。
+- Description: the system must support switching session permission mode and terminating a session when needed. Because the remote chain cannot stop at a local Codex approval dialog, `/enablePermission` must affect later `codex exec` arguments through configurable execution profiles. The current default behavior is `auto -> dangerous`, which bypasses approvals and sandbox together.
 - 输入：会话编号、权限模式切换命令、终止命令
 - 输出：权限模式变更结果、终止结果、更新后的会话状态
 - 前置条件：目标会话存在且来源具备控制权限
@@ -170,7 +170,7 @@
 ### NFR-003 安全性与最小授权
 
 - 类别：安全性
-- 描述：系统必须限制允许来源、限制允许项目根目录，且不得把 `.env`、bot token、敏感密码等内容暴露到远程回复或提交产物中。`dangerous` 档位会绕过 approvals 和 sandbox，只能在可信主机与可信项目上启用。
+- Description: the system must restrict allowed sources and allowed project roots, and must not expose `.env`, bot tokens, or sensitive secrets in remote replies or commits. `dangerous` bypasses both approvals and sandbox; because `auto` now defaults to `dangerous`, this mode must only be used on trusted hosts and whitelisted projects.
 - 验证方式：来源校验、路径越界测试、推送前 `.gitignore` 与工作区检查。
 
 ### NFR-004 可观测性与恢复性
@@ -198,7 +198,7 @@
 - 本机必须已安装并可调用 `codex`，必要时可通过 `CODEX_PUPPETEER_CODEX_CLI` 指定路径。
 - 后台逻辑会话不等同于用户肉眼可见的终端黑框窗口。
 - `/send` 是推荐主交互命令，`/screen` 负责补充查看输出；`/wait` 已退役为用户主流程。
-- 远程控制链路无法暂停在本地审批弹窗上，因此需要通过 `/enablePermission` 或执行档位环境变量预先决定策略。
+- The remote-control chain cannot pause on a local approval dialog, so policy must be decided in advance through `/enablePermission` or execution-profile environment variables; the current default `auto` path is `dangerous`.
 - 默认系统模式应保持 `dry-run`，除非维护者显式配置为 `real`。
 
 ## 8. 风险与待确认事项
@@ -237,7 +237,7 @@
 ### AC-005
 
 - 对应需求：`FR-005`
-- 验收条件：`/enablePermission` 和 `/kill` 可以正确变更会话状态；`/enablePermission` 后的下一次 `/send` 会使用 auto 对应的执行档位。
+- Acceptance condition: `/enablePermission` and `/kill` must correctly change session state; the next `/send` after `/enablePermission` must use the execution profile mapped from `auto`, which now defaults to `dangerous`.
 - 验收方式：自动化测试验证状态切换、执行档位切换和终止结果。
 
 ### AC-006

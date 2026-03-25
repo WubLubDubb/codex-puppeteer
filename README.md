@@ -32,7 +32,7 @@
 - `/screen`：查看当前输出或按 cursor 查看增量输出
 - `/read`：读取绑定项目内文件
 - 历史对话可直接通过 `/activate` 或 `/send` 接管
-- `/enablePermission`：把会话切到 auto 执行档，适合需要自动放行的任务
+- `/enablePermission`: switch the session to auto mode; the current default maps auto to `dangerous` for approval/sandbox-blocked tasks
 - `/disablePermission`：把会话切回 manual 执行档，恢复默认执行策略
 - `/kill`：终止指定会话
 - `/sys`：查看宿主机摘要
@@ -88,7 +88,7 @@
 - `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
 - `CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE`
 - `CODEX_PUPPETEER_CODEX_EXEC_PROFILE`
-- `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`
+- `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`: execution profile used by `auto`; the current default is `dangerous`, and you can set it back to `full-auto` if needed
 - `CODEX_PUPPETEER_CODEX_SANDBOX`
 - `CODEX_PUPPETEER_STORAGE_DIR`
 - `CODEX_PUPPETEER_LOG_DIR`
@@ -99,14 +99,14 @@
 ## 当前验证状态
 
 - 主远程控制链路可用
-- 最新自动化验证：`npm test` => `85/85`
+- 最新自动化验证：`npm test` => `86/86`
 - Windows 为当前主要验证平台
 - 高风险系统动作默认保持 `dry-run`
 
 ## 说明
 
 - `/wait` 已退役，不再是推荐用户命令；当前主流程是 `/send` + `/screen`
-- 如果任务会卡在本地审批提示，先执行 `/enablePermission`；需要恢复默认执行策略时，用 `/disablePermission`
+- If a task is blocked by local approvals or sandbox restrictions, run `/enablePermission` first; use `/disablePermission` to restore the default policy
 - WeCom 入口仍保留在代码中，但个人使用主路径已经切到 Telegram
 
 

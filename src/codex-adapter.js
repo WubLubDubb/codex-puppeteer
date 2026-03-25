@@ -500,7 +500,7 @@ export class ExecCodexAdapter {
     );
     this.autoPermissionExecProfile = resolveExecProfile(
       autoPermissionExecProfile ?? env.CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE,
-      { fallback: "full-auto", optionName: "CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE" }
+      { fallback: "dangerous", optionName: "CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE" }
     );
     this.sandboxMode = resolveSandboxMode(
       sandboxMode ?? env.CODEX_PUPPETEER_CODEX_SANDBOX,

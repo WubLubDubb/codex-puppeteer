@@ -211,7 +211,7 @@ function buildHelpMessage(config) {
   const explicitWaitMinutes = formatWaitMinutes(config?.runtime?.defaultWaitTimeoutMs ?? 0);
   const defaultPermissionMode = String(config?.runtime?.defaultPermissionMode ?? "manual");
   const manualExecProfile = String(config?.runtime?.defaultExecProfile ?? "safe");
-  const autoExecProfile = String(config?.runtime?.autoPermissionExecProfile ?? "full-auto");
+  const autoExecProfile = String(config?.runtime?.autoPermissionExecProfile ?? "dangerous");
   const sandboxMode = config?.runtime?.codexSandboxMode ? String(config.runtime.codexSandboxMode) : "default";
   const systemMode = String(config?.system?.actionMode ?? "dry-run");
 
@@ -248,7 +248,7 @@ function buildHelpMessage(config) {
     "- /screen -n <sessionId|listNumber> [-c <cursor>]：查看当前输出或增量输出",
     "- /read -n <sessionId|listNumber> -f <relativePath>：读取项目内文件",
 
-    "- /enablePermission -n <sessionId|listNumber>：把会话切到 auto 执行档，适合需要自动放行的任务",
+    "- /enablePermission -n <sessionId|listNumber>: switch the session to auto mode for approval/sandbox-blocked tasks; the actual auto profile is shown above",
     "- /disablePermission -n <sessionId|listNumber>：把会话切回 manual 执行档，恢复默认执行策略",
     "- /kill -n <sessionId|listNumber>：终止指定会话",
     "- /sys：查看宿主机状态",
@@ -260,7 +260,7 @@ function buildHelpMessage(config) {
     "- /wait 已废弃，不需要再单独调用",
     "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
     "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
-    "- 如果远程任务会卡在本地审批提示，先执行 /enablePermission；需要恢复默认执行策略时用 /disablePermission",
+    "- If a remote task is blocked by local approvals or sandbox restrictions, run /enablePermission first; use /disablePermission to return to the default policy",
     systemMode === "dry-run"
       ? "- 当前 /shutdown 仍是 dry-run，仅模拟执行，不会真正关机"
       : "- 当前 /shutdown 为 real 模式，使用前请确认风险"

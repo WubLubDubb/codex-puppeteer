@@ -17,12 +17,12 @@
 
 - Telegram 轮询入口、消息控制器、通知器与运行时配置
 - `Codex CLI` 主路径接入，支持 `codex exec --json` 与 `codex exec resume`
-- 可配置执行档位与可选 sandbox 覆盖
+- Configurable execution profiles with optional sandbox override; the current remote default is `manual -> safe` and `auto -> dangerous`
 - `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/disablePermission`、`/kill`、`/sys`
 - `/list` 编号选择、历史会话聚合、普通文本自动路由到活动会话
 - 会话、任务、来源绑定持久化，以及运行时恢复
 - `/send` 单独即时 `/screen` 提示、1 小时默认等待窗口、输出语义分类优化
-- 自动化测试 `85/85` 通过
+- 自动化测试 `86/86` 通过
 
 ### 2.2 进行中
 

@@ -114,7 +114,7 @@ export function createTelegramRuntimeConfigFromEnv({
       ),
       autoPermissionExecProfile: resolveExecProfile(
         env.CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE,
-        baseConfig.runtime.autoPermissionExecProfile || "full-auto"
+        baseConfig.runtime.autoPermissionExecProfile || "dangerous"
       ),
       codexSandboxMode: resolveSandboxMode(
         env.CODEX_PUPPETEER_CODEX_SANDBOX,

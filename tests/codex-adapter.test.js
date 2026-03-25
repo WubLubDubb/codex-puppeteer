@@ -356,6 +356,41 @@ export async function runCodexAdapterTests(runCase) {
     assert.equal(outputs[2].content, "LAST_OK");
   });
 
+  await runCase("defaults auto permission profile to dangerous for remote-enabled sessions", async () => {
+    const invocations = [];
+
+    const adapter = new ExecCodexAdapter({
+      command: "codex",
+      env: {
+        CODEX_PUPPETEER_CODEX_EXEC_PROFILE: "safe",
+        CODEX_PUPPETEER_CODEX_SANDBOX: "workspace-write"
+      },
+      platform: "win32",
+      spawnFactory: (command, args, options) => {
+        invocations.push({ command, args, options });
+        return new FakeChildProcess();
+      }
+    });
+
+    await adapter.sendPrompt({
+      session: {
+        sessionId: "session-0099",
+        projectName: "demo",
+        projectRoot: "F:/Project/codex-puppeteer",
+        launchMode: "background",
+        permissionMode: "auto"
+      },
+      prompt: "Open network and continue"
+    });
+
+    assert.deepEqual(invocations[0].args, [
+      "/d",
+      "/s",
+      "/c",
+      'codex exec --json --dangerously-bypass-approvals-and-sandbox "Open network and continue" --skip-git-repo-check'
+    ]);
+  });
+
   await runCase("uses full-auto and sandbox flags when session permission mode is auto", async () => {
     const invocations = [];
 

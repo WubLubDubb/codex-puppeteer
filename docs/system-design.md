@@ -14,7 +14,7 @@
 - Telegram 主接入链路与 WeCom 兼容接入
 - 逻辑会话创建、历史对话接入、发送 prompt、查看输出、读取文件、切换活动会话
 - `codex exec --json` 与 `codex exec resume` 主路径
-- 配置化执行档位：`safe`、`full-auto`、`dangerous`
+- Configurable execution profiles: `safe`, `full-auto`, and `dangerous`; the current default maps `auto` to `dangerous`.
 - 会话、任务、来源绑定持久化与重启恢复
 - Windows 优先的系统适配与可选真实系统动作
 - `/help` 运行时帮助文本生成与命令发现能力
@@ -271,7 +271,7 @@ Telegram Update
 | `CODEX_PUPPETEER_CODEX_MODE` | 驱动模式选择 |
 | `CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE` | 新会话默认权限模式 |
 | `CODEX_PUPPETEER_CODEX_EXEC_PROFILE` | `manual` 模式对应的执行档位 |
-| `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE` | `auto` 模式对应的执行档位 |
+| `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE` | Execution profile used by `auto`; the current default is `dangerous` |
 | `CODEX_PUPPETEER_CODEX_SANDBOX` | `safe`/`full-auto` 可选 sandbox 覆盖 |
 | `CODEX_PUPPETEER_WAIT_TIMEOUT_MS` | 显式等待或补充查看的默认超时 |
 | `CODEX_PUPPETEER_SEND_WAIT_TIMEOUT_MS` | `/send` 默认内部等待时间，当前默认 `3600000` |

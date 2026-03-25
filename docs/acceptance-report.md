@@ -37,7 +37,7 @@
 ## 4. 自动化验证结果
 
 - 执行命令：`npm test`
-- 最新结果：`85/85` 通过，`0` 失败
+- 最新结果：`86/86` 通过，`0` 失败
 - 覆盖重点：
   - 命令解析与参数校验
   - `/help` 运行时帮助文本
@@ -64,7 +64,7 @@
 | 直接向历史 Codex 会话续聊 | `FR-006` | 通过 | 支持 `codexConversationId`、`/list` 编号和 `/activate` 路径 |
 | `/screen` 查看完整与增量输出 | `FR-004` | 通过 | 支持 cursor 增量查看 |
 | `/read` 读取项目内文件 | `FR-004` | 通过 | 路径边界校验有效 |
-| `/enablePermission`、`/disablePermission` 与 `/kill` 控制会话 | `FR-005` | 通过 | auto/manual 状态切换和终止动作均可验证 |
+| Session permission toggling and kill control | `FR-005` | Pass | auto/manual state switching, the default `auto -> dangerous` path, and termination behavior are all verifiable |
 | 会话、任务、来源绑定持久化 | `FR-006` | 通过 | 文件持久化测试通过 |
 | 启动恢复与残留会话清理 | `FR-006` | 通过 | 未完成任务被标记为中断 |
 | `/sys` 返回宿主机摘要 | `FR-007` | 通过 | 可查看 CPU、内存、活动会话数 |
@@ -77,11 +77,11 @@
 
 ## 7. 风险评估
 
-1. assistant 完成态识别仍依赖输出语义分析，在复杂真实任务下可能继续微调
-2. 默认 `/send` 等待时间已延长到 1 小时，但极端长任务仍可能需要人工通过 `/screen` 持续查看
-3. macOS 尚未完成与 Windows 同等级真实验收
-4. 真实系统关机能力不应作为当前主链路交付判断依据
-5. 常驻服务部署、日志治理和异常告警仍需继续加强
+1. `/enablePermission` now defaults remote runs to `auto -> dangerous`; this is necessary for remote autonomy, but it must remain limited to trusted hosts and whitelisted projects.
+2. Assistant completion detection still depends on output semantics and may need more tuning in complex real tasks.
+3. The default `/send` wait is already one hour, but extremely long jobs may still require manual follow-up with `/screen`.
+4. macOS has not yet been validated to the same depth as Windows.
+5. Real shutdown actions are not a delivery criterion for the main path, and service/logging/alert hardening still needs work.
 
 ## 8. 结论与后续建议
 
