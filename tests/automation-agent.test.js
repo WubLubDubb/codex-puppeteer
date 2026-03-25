@@ -117,6 +117,13 @@ class ControlledCodexAdapter {
     };
   }
 
+  async disablePermission({ session }) {
+    return {
+      actionId: "disablePermission",
+      summary: `Restored controlled default execution mode for ${session.sessionId}.`
+    };
+  }
+
   async readFile({ relativePath }) {
     return {
       actionId: "read",
@@ -168,6 +175,7 @@ export async function runAutomationAgentTests(runCase) {
     assert.match(result.task.resultSummary, /\/create -n <name> -w <workspace>/);
     assert.match(result.task.resultSummary, /\/activate -n <sessionId\|codexConversationId\|listNumber> \[-w <workspace>\]/);
     assert.match(result.task.resultSummary, /\/send -n <sessionId\|codexConversationId\|listNumber> -m <prompt>/);
+    assert.match(result.task.resultSummary, /\/disablePermission -n <sessionId\|listNumber>/);
     assert.match(result.task.resultSummary, /F:\\project/);
     assert.match(result.task.resultSummary, /60 分钟/);
     assert.match(result.task.resultSummary, /workspace-write/);
@@ -897,7 +905,7 @@ export async function runAutomationAgentTests(runCase) {
     assert.match(result.task.resultSummary, /non-negative integer/i);
   });
 
-  await runCase("updates permission mode and can kill a session", async () => {
+  await runCase("updates permission mode, can restore manual mode, and can kill a session", async () => {
     const adapter = new ControlledCodexAdapter({
       outputPlan: [
         { afterMs: 20, exit: true, nextStatus: "ready", preserveBinding: true }
@@ -928,6 +936,20 @@ export async function runAutomationAgentTests(runCase) {
 
     assert.equal(sendResult.ok, true);
     assert.equal(adapter.sentPrompts.at(-1).permissionMode, "auto");
+
+    const disableResult = await agent.receiveText(
+      buildMessage(`/disablePermission -n ${sessionId}`)
+    );
+
+    assert.equal(disableResult.ok, true);
+    assert.equal(disableResult.task.response.session.permissionMode, "manual");
+
+    const manualSendResult = await agent.receiveText(
+      buildMessage(`/send -n ${sessionId} -m "Run with default mode"`)
+    );
+
+    assert.equal(manualSendResult.ok, true);
+    assert.equal(adapter.sentPrompts.at(-1).permissionMode, "manual");
 
     const killResult = await agent.receiveText(buildMessage(`/kill -n ${sessionId}`));
 

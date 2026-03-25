@@ -33,6 +33,7 @@
 - `/read`：读取绑定项目内文件
 - 历史对话可直接通过 `/activate` 或 `/send` 接管
 - `/enablePermission`：把会话切到 auto 执行档，适合需要自动放行的任务
+- `/disablePermission`：把会话切回 manual 执行档，恢复默认执行策略
 - `/kill`：终止指定会话
 - `/sys`：查看宿主机摘要
 - 会话、任务、来源绑定持久化与重启恢复
@@ -63,6 +64,7 @@
 - `/read -n session-0001 -f README.md`
 - `/send -n thread-123 -m "继续上次开发"`
 - `/enablePermission -n session-0001`
+- `/disablePermission -n session-0001`
 - `/kill -n session-0001`
 - `/sys`
 
@@ -97,15 +99,16 @@
 ## 当前验证状态
 
 - 主远程控制链路可用
-- 最新自动化验证：`npm test` => `84/84`
+- 最新自动化验证：`npm test` => `85/85`
 - Windows 为当前主要验证平台
 - 高风险系统动作默认保持 `dry-run`
 
 ## 说明
 
 - `/wait` 已退役，不再是推荐用户命令；当前主流程是 `/send` + `/screen`
-- 如果任务会卡在本地审批提示，先执行 `/enablePermission`，或调整 `.env` 中的执行档位配置
+- 如果任务会卡在本地审批提示，先执行 `/enablePermission`；需要恢复默认执行策略时，用 `/disablePermission`
 - WeCom 入口仍保留在代码中，但个人使用主路径已经切到 Telegram
+
 
 
 

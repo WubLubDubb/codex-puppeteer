@@ -37,13 +37,13 @@
 ## 4. 自动化验证结果
 
 - 执行命令：`npm test`
-- 最新结果：`84/84` 通过，`0` 失败
+- 最新结果：`85/85` 通过，`0` 失败
 - 覆盖重点：
   - 命令解析与参数校验
   - `/help` 运行时帮助文本
   - `/projects`、`/create`、`/list`、`/activate`
   - `/send` 自动等待、即时 `/screen` 提示、超时结果判定
-  - `/screen`、`/read`、`/enablePermission`、`/kill`
+  - `/screen`、`/read`、`/enablePermission`、`/disablePermission`、`/kill`
   - 历史会话续聊、activate、resume
   - 会话/任务/绑定持久化与启动恢复
   - Telegram 入口、通知分片、配置加载
@@ -64,7 +64,7 @@
 | 直接向历史 Codex 会话续聊 | `FR-006` | 通过 | 支持 `codexConversationId`、`/list` 编号和 `/activate` 路径 |
 | `/screen` 查看完整与增量输出 | `FR-004` | 通过 | 支持 cursor 增量查看 |
 | `/read` 读取项目内文件 | `FR-004` | 通过 | 路径边界校验有效 |
-| `/enablePermission` 与 `/kill` 控制会话 | `FR-005` | 通过 | 状态切换和终止动作均可验证 |
+| `/enablePermission`、`/disablePermission` 与 `/kill` 控制会话 | `FR-005` | 通过 | auto/manual 状态切换和终止动作均可验证 |
 | 会话、任务、来源绑定持久化 | `FR-006` | 通过 | 文件持久化测试通过 |
 | 启动恢复与残留会话清理 | `FR-006` | 通过 | 未完成任务被标记为中断 |
 | `/sys` 返回宿主机摘要 | `FR-007` | 通过 | 可查看 CPU、内存、活动会话数 |
@@ -98,5 +98,7 @@
 2. 补齐 Windows 常驻服务部署方案和异常告警策略
 3. 在明确需要时，再推进 macOS 真实验证与回写
 4. 保持系统动作默认 `dry-run`，优先保证远程控制主链路稳定性
+
+
 
 

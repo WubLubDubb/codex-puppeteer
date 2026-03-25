@@ -18,11 +18,11 @@
 - Telegram 轮询入口、消息控制器、通知器与运行时配置
 - `Codex CLI` 主路径接入，支持 `codex exec --json` 与 `codex exec resume`
 - 可配置执行档位与可选 sandbox 覆盖
-- `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/kill`、`/sys`
+- `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/disablePermission`、`/kill`、`/sys`
 - `/list` 编号选择、历史会话聚合、普通文本自动路由到活动会话
 - 会话、任务、来源绑定持久化，以及运行时恢复
 - `/send` 单独即时 `/screen` 提示、1 小时默认等待窗口、输出语义分类优化
-- 自动化测试 `84/84` 通过
+- 自动化测试 `85/85` 通过
 
 ### 2.2 进行中
 
@@ -112,5 +112,7 @@
 2. 逻辑会话、历史会话续聊、持久化与恢复已落地
 3. `/help`、`/send`、`/screen`、`/list`、`/activate` 等核心交互已统一到文档、实现和测试中
 4. 自动化测试通过，且剩余未完成事项被明确记录为后续工作，而不是混入“已交付”描述中
+
+
 
 

@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | `/help` 无参数解析 | 通过 | 解析器正确返回 `commandKey=help` |
 | `/help` 返回运行时帮助文本 | 通过 | 文本包含允许根目录、等待时间、执行档位、sandbox 和命令列表 |
-| 核心远程控制链路回归 | 通过 | `/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/kill`、`/sys` 均保持通过 |
+| 核心远程控制链路回归 | 通过 | `/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/disablePermission`、`/kill`、`/sys` 均保持通过 |
 
 ## 5. 验证结果
 
@@ -46,4 +46,5 @@
 
 1. 后续新增命令时，必须同时更新 `/help` 文本和对应测试。
 2. 若继续调整 `/send` 行为，应同步回写 README、需求文档和验收报告。
+
 

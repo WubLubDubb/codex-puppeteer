@@ -74,6 +74,7 @@
 | `/screen -n <sessionId|listNumber> [-c <cursor>]` | 查看会话输出或增量输出 |
 | `/read -n <sessionId|listNumber> -f <relativePath>` | 读取绑定项目内文件 |
 | `/enablePermission -n <sessionId|listNumber>` | 切换会话权限模式，并让后续执行进入 auto 档位 |
+| `/disablePermission -n <sessionId|listNumber>` | 把会话切回 manual 档位，恢复默认执行策略 |
 | `/kill -n <sessionId|listNumber>` | 终止指定会话 |
 | `/sys` | 查看宿主机与运行时状态 |
 | `/shutdown ...`、`/cancel_shutdown` | 高风险系统动作，当前非主验收路径 |

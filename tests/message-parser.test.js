@@ -36,6 +36,16 @@ export async function runMessageParserTests(runCase) {
     });
   });
 
+  await runCase("parses disablePermission commands with target flags", () => {
+    const parser = new WeChatCommandParser();
+    const parsed = parser.parse("/disablePermission -n session-0001");
+
+    assert.equal(parsed.commandKey, "disablepermission");
+    assert.deepEqual(parsed.args, {
+      n: "session-0001"
+    });
+  });
+
   await runCase("parses projects commands with workspace filters", () => {
     const parser = new WeChatCommandParser();
     const parsed = parser.parse('/projects -w F:\\project');

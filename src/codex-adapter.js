@@ -429,6 +429,13 @@ export class SimulatedCodexAdapter {
     };
   }
 
+  async disablePermission({ session }) {
+    return {
+      actionId: "disablePermission",
+      summary: `Restored simulated default execution mode for ${session.sessionId}.`
+    };
+  }
+
   async readFile({ absolutePath, relativePath }) {
     const content = await readUtf8File(absolutePath);
 
@@ -645,6 +652,21 @@ export class ExecCodexAdapter {
     return {
       actionId: "enablePermission",
       summary: `Permission mode switched for session ${session.sessionId}. Next runs will use ${describeExecStrategy(executionStrategy)}.`,
+      permissionMode: executionStrategy.permissionMode,
+      executionProfile: executionStrategy.execProfile,
+      sandboxMode: executionStrategy.sandboxMode
+    };
+  }
+
+  async disablePermission({ session }) {
+    const executionStrategy = this.#resolveExecutionStrategy({
+      ...session,
+      permissionMode: "manual"
+    });
+
+    return {
+      actionId: "disablePermission",
+      summary: `Permission mode restored for session ${session.sessionId}. Next runs will use ${describeExecStrategy(executionStrategy)}.`,
       permissionMode: executionStrategy.permissionMode,
       executionProfile: executionStrategy.execProfile,
       sandboxMode: executionStrategy.sandboxMode
@@ -972,6 +994,13 @@ export class SubprocessCodexAdapter {
     };
   }
 
+  async disablePermission({ session }) {
+    return {
+      actionId: "disablePermission",
+      summary: `Permission mode restored for session ${session.sessionId}.`
+    };
+  }
+
   async readFile({ absolutePath, relativePath }) {
     const content = await readUtf8File(absolutePath);
 
@@ -1271,6 +1300,13 @@ export class PtyCodexAdapter {
     return {
       actionId: "enablePermission",
       summary: `Permission mode switched for session ${session.sessionId}.`
+    };
+  }
+
+  async disablePermission({ session }) {
+    return {
+      actionId: "disablePermission",
+      summary: `Permission mode restored for session ${session.sessionId}.`
     };
   }
 

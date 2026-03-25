@@ -249,6 +249,7 @@ function buildHelpMessage(config) {
     "- /read -n <sessionId|listNumber> -f <relativePath>：读取项目内文件",
 
     "- /enablePermission -n <sessionId|listNumber>：把会话切到 auto 执行档，适合需要自动放行的任务",
+    "- /disablePermission -n <sessionId|listNumber>：把会话切回 manual 执行档，恢复默认执行策略",
     "- /kill -n <sessionId|listNumber>：终止指定会话",
     "- /sys：查看宿主机状态",
     "- /shutdown -a <password>：等待所有活跃会话结束后关机",
@@ -259,7 +260,7 @@ function buildHelpMessage(config) {
     "- /wait 已废弃，不需要再单独调用",
     "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
     "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
-    "- 如果远程任务会卡在本地审批提示，先执行 /enablePermission，或者直接调整 .env 里的执行档位配置",
+    "- 如果远程任务会卡在本地审批提示，先执行 /enablePermission；需要恢复默认执行策略时用 /disablePermission",
     systemMode === "dry-run"
       ? "- 当前 /shutdown 仍是 dry-run，仅模拟执行，不会真正关机"
       : "- 当前 /shutdown 为 real 模式，使用前请确认风险"
@@ -656,6 +657,8 @@ export class AutomationAgent {
         return this.#handleKill(parsedCommand.args, message);
       case "enablepermission":
         return this.#handleEnablePermission(parsedCommand.args, message);
+      case "disablepermission":
+        return this.#handleDisablePermission(parsedCommand.args, message);
       case "sys":
         return this.#handleSystemProbe();
       case "shutdown":
@@ -1216,6 +1219,25 @@ export class AutomationAgent {
     return {
       actionId: "enablePermission",
       summary: adapterResult?.summary ?? `Session ${session.sessionId} permission mode switched to auto.`,
+      session: updatedSession,
+      executionProfile: adapterResult?.executionProfile ?? null,
+      sandboxMode: adapterResult?.sandboxMode ?? null
+    };
+  }
+
+  async #handleDisablePermission(args, message) {
+    const session = this.#requireSession(args, message);
+    this.sessionRepository.setPermissionMode(session.sessionId, "manual");
+    const updatedSession = this.sessionRepository.getSession(session.sessionId);
+    const adapterResult =
+      typeof this.codexAdapter.disablePermission === "function"
+        ? await this.codexAdapter.disablePermission({ session: updatedSession })
+        : null;
+
+    return {
+      actionId: "disablePermission",
+      summary:
+        adapterResult?.summary ?? `Session ${session.sessionId} permission mode switched to manual.`,
       session: updatedSession,
       executionProfile: adapterResult?.executionProfile ?? null,
       sandboxMode: adapterResult?.sandboxMode ?? null

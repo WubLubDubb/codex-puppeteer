@@ -255,6 +255,7 @@ Telegram Update
 | `/screen` | 会话标识、cursor、行数 | 输出缓冲文本 |
 | `/read` | 会话标识、相对路径 | 文件内容 |
 | `/enablePermission` | 会话标识 | 权限模式变更结果 |
+| `/disablePermission` | 会话标识 | 权限模式切回 manual 的结果 |
 | `/kill` | 会话标识 | 终止结果 |
 | `/sys` | 无 | 宿主机状态摘要 |
 | `/shutdown`、`/cancel_shutdown` | 密码或取消动作 | 系统动作计划状态 |
