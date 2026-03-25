@@ -34,7 +34,7 @@
 | `FR-003` | Automation Agent、Codex Adapter、输出分析层 | `/send` 自动等待与结果判断 |
 | `FR-004` | 会话输出缓冲层、文件访问层 | `/screen` 与 `/read` |
 | `FR-005` | 控制命令层、策略层 | `/enablePermission` 与 `/kill` |
-| `FR-006` | 持久化层、历史会话读取层、恢复层 | attach、resume、重启恢复 |
+| `FR-006` | 持久化层、历史会话读取层、恢复层 | 历史会话激活、resume、重启恢复 |
 | `FR-007` | 列表与通知层、帮助文本生成层、系统探针层 | `/list`、`/activate`、`/help`、`/sys` |
 | `FR-008` | 配置层、项目发现层、驱动抽象层 | 白名单目录、运行时配置、驱动选择 |
 
@@ -174,7 +174,7 @@ Telegram Update
 1. `/list` 同时读取托管会话和本机 Codex 历史索引
 2. Agent 去重已绑定历史会话，并按“托管会话优先、历史会话随后”的顺序生成编号
 3. 编号映射按聊天来源保存在内存中，后续 `/send -n <number>`、`/screen -n <number>` 可直接复用
-4. `/activate -n <sessionId|listNumber>` 只切换当前聊天绑定，不发送 prompt
+4. `/activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]` 可以切换托管会话，也可以直接接管历史对话，但本身不发送 prompt
 
 ### 5.3 `/send` 自动等待与即时 `/screen` 提示流程
 
@@ -189,7 +189,7 @@ Telegram Update
 
 ### 5.4 历史对话接入与续聊流程
 
-1. 用户可以通过 `/attach -i ...`、`/attach -last ...`，或直接 `/send -n <codexConversationId>` 进入历史会话路径
+1. 用户可以通过 `/activate -n <codexConversationId|listNumber> [-w <workspace>]`，或直接 `/send -n <codexConversationId>` 进入历史会话路径
 2. 如果该历史会话已被托管，则直接复用现有逻辑会话
 3. 如果尚未托管，则基于当前或显式工作区上下文自动创建新的逻辑会话并记录 `codexThreadId`
 4. 之后普通文本或 `/send` 会继续通过 `codex exec resume` 路径续聊
@@ -249,9 +249,8 @@ Telegram Update
 | `/help` | 无 | 当前运行配置摘要与命令说明 |
 | `/projects` | 可选允许根目录过滤 | 项目目录列表 |
 | `/create` | 项目名、工作区 | 会话快照、创建结果 |
-| `/attach` | 历史会话标识、工作区 | 逻辑会话快照 |
 | `/list` | 可选历史展开参数 | 托管会话、本机历史会话、编号选择 |
-| `/activate` | 会话编号或列表编号 | 当前聊天绑定切换结果 |
+| `/activate` | 会话编号、历史会话编号或列表编号，可选 `-w` | 当前聊天绑定切换结果 |
 | `/send` | 会话标识、prompt | assistant 输出或状态结果、cursor、即时 `/screen` 提示 |
 | `/screen` | 会话标识、cursor、行数 | 输出缓冲文本 |
 | `/read` | 会话标识、相对路径 | 文件内容 |
@@ -300,3 +299,6 @@ Telegram Update
 - 是否需要为最终用户暴露更细粒度的 `/send` 等待参数
 - Windows 常驻服务最终采用何种部署包装方式，例如 NSSM、计划任务或其他方案
 - 未来是否需要增强对多来源、多用户、共享机器场景的隔离策略
+
+
+

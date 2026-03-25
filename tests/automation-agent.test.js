@@ -166,11 +166,13 @@ export async function runAutomationAgentTests(runCase) {
     assert.match(result.task.resultSummary, /WxCodex Agent \/help/);
     assert.match(result.task.resultSummary, /\/projects/);
     assert.match(result.task.resultSummary, /\/create -n <name> -w <workspace>/);
+    assert.match(result.task.resultSummary, /\/activate -n <sessionId\|codexConversationId\|listNumber> \[-w <workspace>\]/);
     assert.match(result.task.resultSummary, /\/send -n <sessionId\|codexConversationId\|listNumber> -m <prompt>/);
     assert.match(result.task.resultSummary, /F:\\project/);
     assert.match(result.task.resultSummary, /60 分钟/);
     assert.match(result.task.resultSummary, /workspace-write/);
     assert.match(result.task.resultSummary, /\/wait 已废弃/);
+    assert.doesNotMatch(result.task.resultSummary, /\/attach/);
   });
 
 
@@ -198,13 +200,13 @@ export async function runAutomationAgentTests(runCase) {
     assert.match(result.task.resultSummary, /03-23 10:00/);
   });
 
-  await runCase("lists managed sessions together with unmatched local Codex history", async () => {
+  await runCase("lists managed sessions together with activated local Codex history", async () => {
     const agent = createDefaultAgent({
       codexAdapter: new ControlledCodexAdapter({
         localSessions: [
           {
             codexSessionId: "thread-123",
-            title: "Existing attached conversation",
+            title: "Existing history conversation",
             updatedAt: "2026-03-23T11:00:00.000Z"
           },
           {
@@ -216,22 +218,23 @@ export async function runAutomationAgentTests(runCase) {
       })
     });
 
-    const attachResult = await agent.receiveText(
-      buildMessage("/attach -n DemoProject -w demo -i thread-123")
+    const activateResult = await agent.receiveText(
+      buildMessage('/activate -n thread-123 -w demo')
     );
-    const createResult = await agent.receiveText(buildMessage("/create -n FreshProject -w demo"));
-    const result = await agent.receiveText(buildMessage("/list"));
+    const createResult = await agent.receiveText(buildMessage('/create -n FreshProject -w demo'));
+    const result = await agent.receiveText(buildMessage('/list'));
 
+    assert.equal(activateResult.ok, true);
+    assert.equal(activateResult.task.response.session.codexThreadId, 'thread-123');
     assert.equal(result.ok, true);
     assert.equal(result.task.response.sessions.length, 2);
     assert.equal(result.task.response.localCodexSessions.length, 1);
-    assert.equal(result.task.response.localCodexSessions[0].codexSessionId, "thread-999");
+    assert.equal(result.task.response.localCodexSessions[0].codexSessionId, 'thread-999');
     assert.equal(result.task.response.activeSessionId, createResult.task.response.session.sessionId);
     assert.match(result.task.resultSummary, /Current sessions \(2\):/);
     assert.match(result.task.resultSummary, /Recent history \(1\/1\):/);
     assert.match(result.task.resultSummary, /codex=thread-123/);
     assert.doesNotMatch(result.task.resultSummary, / @ /);
-    assert.equal(attachResult.ok, true);
   });
 
   await runCase("numbers /list entries and resolves later commands by those numbers", async () => {
@@ -355,7 +358,7 @@ export async function runAutomationAgentTests(runCase) {
     assert.equal(screenResult.ok, false);
     assert.equal(screenResult.task.status, 'rejected');
     assert.match(screenResult.task.resultSummary, /local Codex history/i);
-    assert.match(screenResult.task.resultSummary, /\/send -n 1 -m <prompt>/i);
+    assert.match(screenResult.task.resultSummary, /\/activate -n 1/i);
   });
 
   await runCase("limits local Codex history output for mobile readability", async () => {
@@ -455,47 +458,69 @@ export async function runAutomationAgentTests(runCase) {
     }
   });
 
-  await runCase("attaches an existing Codex conversation by id and reuses it on send", async () => {
-    const adapter = new ControlledCodexAdapter({ sendSessionStatus: "ready" });
+  await runCase("activates a local Codex conversation by /list number and routes plain text there", async () => {
+    const adapter = new ControlledCodexAdapter({
+      sendSessionStatus: 'ready',
+      localSessions: [
+        {
+          codexSessionId: 'thread-123',
+          title: 'Existing history conversation',
+          updatedAt: '2026-03-24T00:00:00.000Z'
+        }
+      ]
+    });
     const agent = createDefaultAgent({ codexAdapter: adapter });
 
-    const attachResult = await agent.receiveText(
-      buildMessage("/attach -n DemoProject -w demo -i thread-123")
-    );
-    const sessionId = attachResult.task.response.session.sessionId;
+    const createResult = await agent.receiveText(buildMessage('/create -n DemoProject -w demo'));
+    const originalSessionId = createResult.task.response.session.sessionId;
+    const listResult = await agent.receiveText(buildMessage('/list'));
 
-    assert.equal(attachResult.ok, true);
-    assert.equal(attachResult.task.response.session.codexThreadId, "thread-123");
+    assert.equal(listResult.ok, true);
+    assert.equal(listResult.task.response.selectionEntries.length, 2);
+    assert.equal(listResult.task.response.selectionEntries[1].type, 'local');
 
-    const sendResult = await agent.receiveText(
-      buildMessage(`/send -n ${sessionId} -m "Continue implementation"`)
-    );
+    const activateResult = await agent.receiveText(buildMessage('/activate -n 2'));
+    const activatedSessionId = activateResult.task.response.session.sessionId;
 
-    assert.equal(sendResult.ok, true);
-    assert.equal(adapter.sentPrompts.at(-1).sessionId, sessionId);
-    assert.equal(adapter.sentPrompts.at(-1).resumedThreadId, "thread-123");
-    assert.equal(adapter.sentPrompts.at(-1).resumeMode, null);
+    assert.equal(activateResult.ok, true);
+    assert.notEqual(activatedSessionId, originalSessionId);
+    assert.equal(activateResult.task.response.session.codexThreadId, 'thread-123');
+
+    const implicitSendResult = await agent.receiveText(buildMessage('Continue implementation'));
+
+    assert.equal(implicitSendResult.ok, true);
+    assert.equal(implicitSendResult.task.response.session.sessionId, activatedSessionId);
+    assert.equal(adapter.sentPrompts.at(-1).sessionId, activatedSessionId);
+    assert.equal(adapter.sentPrompts.at(-1).resumedThreadId, 'thread-123');
   });
 
-  await runCase("attaches the most recent local Codex conversation and routes plain text into it", async () => {
-    const adapter = new ControlledCodexAdapter({ sendSessionStatus: "ready" });
+  await runCase("activates a local Codex conversation by id with an explicit workspace and routes plain text there", async () => {
+    const adapter = new ControlledCodexAdapter({
+      sendSessionStatus: 'ready',
+      localSessions: [
+        {
+          codexSessionId: 'thread-456',
+          title: 'Continue yesterday task',
+          updatedAt: '2026-03-24T00:00:00.000Z'
+        }
+      ]
+    });
     const agent = createDefaultAgent({ codexAdapter: adapter });
 
-    const attachResult = await agent.receiveText(
-      buildMessage("/attach -last -n DemoProject -w demo")
+    const activateResult = await agent.receiveText(
+      buildMessage('/activate -n thread-456 -w demo')
     );
-    const sessionId = attachResult.task.response.session.sessionId;
+    const sessionId = activateResult.task.response.session.sessionId;
 
-    assert.equal(attachResult.ok, true);
-    assert.equal(attachResult.task.response.session.codexResumeMode, "last");
+    assert.equal(activateResult.ok, true);
+    assert.equal(activateResult.task.response.session.codexThreadId, 'thread-456');
 
     const implicitSendResult = await agent.receiveText(buildMessage("Continue yesterday's task"));
 
     assert.equal(implicitSendResult.ok, true);
     assert.equal(implicitSendResult.task.response.session.sessionId, sessionId);
     assert.equal(adapter.sentPrompts.at(-1).sessionId, sessionId);
-    assert.equal(adapter.sentPrompts.at(-1).resumeMode, "last");
-    assert.equal(adapter.sentPrompts.at(-1).resumedThreadId, null);
+    assert.equal(adapter.sentPrompts.at(-1).resumedThreadId, 'thread-456');
   });
 
   await runCase("sends directly to a local Codex conversation id using the active workspace context", async () => {
@@ -535,17 +560,17 @@ export async function runAutomationAgentTests(runCase) {
       localSessions: [
         {
           codexSessionId: "thread-123",
-          title: "Existing attached conversation",
+          title: "Existing managed conversation",
           updatedAt: "2026-03-24T00:00:00.000Z"
         }
       ]
     });
     const agent = createDefaultAgent({ codexAdapter: adapter });
 
-    const attachResult = await agent.receiveText(
-      buildMessage('/attach -n DemoProject -w demo -i thread-123')
+    const activateResult = await agent.receiveText(
+      buildMessage('/activate -n thread-123 -w demo')
     );
-    const sessionId = attachResult.task.response.session.sessionId;
+    const sessionId = activateResult.task.response.session.sessionId;
 
     const sendResult = await agent.receiveText(
       buildMessage('/send -n thread-123 -m "Continue implementation"')
@@ -949,6 +974,11 @@ export async function runAutomationAgentTests(runCase) {
     assert.ok(result.task.response.snapshot.activeSessions >= 0);
   });
 }
+
+
+
+
+
 
 
 

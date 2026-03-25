@@ -25,25 +25,14 @@ export async function runMessageParserTests(runCase) {
     });
   });
 
-  await runCase("parses attach commands with boolean flags", () => {
+  await runCase("parses activate commands with target and workspace flags", () => {
     const parser = new WeChatCommandParser();
-    const parsed = parser.parse("/attach -last -w demo -n DemoProject");
-
-    assert.equal(parsed.commandKey, "attach");
-    assert.deepEqual(parsed.args, {
-      last: true,
-      w: "demo",
-      n: "DemoProject"
-    });
-  });
-
-  await runCase("parses activate commands with target flags", () => {
-    const parser = new WeChatCommandParser();
-    const parsed = parser.parse("/activate -n 2");
+    const parsed = parser.parse("/activate -n thread-123 -w demo");
 
     assert.equal(parsed.commandKey, "activate");
     assert.deepEqual(parsed.args, {
-      n: "2"
+      n: "thread-123",
+      w: "demo"
     });
   });
 
@@ -83,5 +72,7 @@ export async function runMessageParserTests(runCase) {
     );
   });
 }
+
+
 
 

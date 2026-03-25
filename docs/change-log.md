@@ -19,12 +19,12 @@
 - 帮助文本已对齐当前实际运行配置：允许根目录、默认等待时间、权限模式、执行档位、sandbox 与系统模式
 - 补充测试：`tests/message-parser.test.js` 与 `tests/automation-agent.test.js`
 - 同步回写 `README.md`、`docs/requirements.md`、`docs/system-design.md`、`docs/development-plan.md`、`docs/acceptance-report.md`、`.agent/current-state.md`、`.agent/traceability.md`
-- 最新自动化验证：`npm test` => `85/85`
+- 最新自动化验证：`npm test` => `84/84`
 - Git 发布：`0c083ea` 已成功推送到 `origin/main`
 
 ### 2026-03-24 近期基线能力
 
-- `/activate -n <sessionId|listNumber>`：切换当前聊天绑定的活动会话
+- `/activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]`：切换当前聊天绑定的活动会话，并可直接接管历史对话
 - `/list -a`、`/list -c <count>`：展开本机 Codex 历史会话；可见条目支持编号操作
 - `/projects`：列出允许根目录下的首层项目目录，减少 `/create` 的手输路径成本
 - `/send -n <codexConversationId>`：直接向本机历史 Codex 对话续聊，必要时自动补建托管会话
@@ -47,4 +47,5 @@
 - `docs/dev-logs/2026/2026-03-25.md`
 - `docs/dev-logs/2026/2026-03-24.md`
 - 历史阶段验收：`docs/acceptance-reports/`
+
 

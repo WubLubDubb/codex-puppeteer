@@ -44,7 +44,7 @@
 - 通过 Telegram 接收文本命令、校验来源、回传结果。
 - 在允许的项目根目录下创建新的逻辑 Codex 会话。
 - 接入本机已有的 Codex 历史对话，并继续发送 prompt。
-- 支持 `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/attach -i`、`/attach -last`、`/enablePermission`、`/kill`、`/sys` 等命令。
+- 支持 `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/kill`、`/sys` 等命令。
 - 支持会话、任务、来源绑定的本地持久化与重启恢复。
 - 支持 `exec-json`、`pty`、`pipe` 等驱动抽象，其中 `exec-json` 为当前主路径。
 - 支持通过执行档位处理远程审批场景：`safe`、`full-auto`、`dangerous`，并可选配置 sandbox。
@@ -67,10 +67,8 @@
 | `/help` | 查看当前系统支持的命令、默认行为与配置摘要 |
 | `/projects [-w <allowedRoot>]` | 查看允许根目录下的首层项目目录 |
 | `/create -n <name> -w <workspace>` | 创建新的逻辑 Codex 会话 |
-| `/attach -last -w <workspace> [-n <name>]` | 接上最近一次本机 Codex 历史对话 |
-| `/attach -i <codexSessionId> -w <workspace> [-n <name>]` | 接上指定本机 Codex 历史对话 |
 | `/list [-a] [-c <count>]` | 同时查看托管会话和本机历史会话，并生成编号 |
-| `/activate -n <sessionId|listNumber>` | 切换当前聊天绑定的活动会话 |
+| `/activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]` | 切换当前聊天绑定的活动会话；必要时可直接激活本机历史对话 |
 | `/send -n <sessionId|codexConversationId|listNumber> -m <prompt>` | 发送 prompt，并自动等待当前轮回复 |
 | 直接发送普通文本 | 发给当前聊天已绑定的活动会话 |
 | `/screen -n <sessionId|listNumber> [-c <cursor>]` | 查看会话输出或增量输出 |
@@ -130,7 +128,7 @@
 ### FR-006 历史对话接入、持久化与重启恢复
 
 - 名称：续接已有 Codex 对话并在重启后恢复逻辑会话
-- 描述：系统必须持久化逻辑会话、任务和来源绑定；支持通过 `/attach -i`、`/attach -last` 或 `/send -n <codexConversationId>` 继续本机已有 Codex 历史对话；服务重启时要恢复可继续使用的逻辑会话，并把未完成任务标记为中断。
+- 描述：系统必须持久化逻辑会话、任务和来源绑定；支持通过 `/activate -n <codexConversationId|listNumber> [-w <workspace>]` 或 `/send -n <codexConversationId>` 继续本机已有 Codex 历史对话；服务重启时要恢复可继续使用的逻辑会话，并把未完成任务标记为中断。
 - 输入：会话元数据、Codex 历史会话编号、持久化文件、启动恢复事件
 - 输出：恢复后的会话快照、历史对话绑定结果、中断任务标记结果
 - 前置条件：本地状态目录可写；本机存在可读取的 Codex 历史索引时，才能列出本机历史会话
@@ -244,7 +242,7 @@
 ### AC-006
 
 - 对应需求：`FR-006`
-- 验收条件：系统重启后可以恢复已持久化会话；可以通过显式 attach 或直接历史会话编号继续已有对话。
+- 验收条件：系统重启后可以恢复已持久化会话；可以通过 `/activate` 或 `/send` 直接继续历史对话。
 - 验收方式：持久化与恢复自动化测试。
 
 ### AC-007
@@ -258,3 +256,6 @@
 - 对应需求：`FR-008`
 - 验收条件：不同主机可通过配置切换允许根目录、Bot 参数、Codex CLI 路径、等待策略和执行档位；`/projects` 可列出允许目录下的项目目录。
 - 验收方式：环境变量配置测试、`/projects`/`/help` 自动化测试与启动验证。
+
+
+

@@ -242,13 +242,12 @@ function buildHelpMessage(config) {
     "- /projects [-w <allowedRoot>]：列出允许根目录下的项目文件夹",
     "- /create -n <name> -w <workspace>：创建新会话",
     "- /list [-a] [-c <count>]：查看托管会话和本机 Codex 历史对话",
-    "- /activate -n <sessionId|listNumber>：切换当前聊天绑定的活动会话",
+    "- /activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]：切换当前聊天绑定的活动会话",
     "- /send -n <sessionId|codexConversationId|listNumber> -m <prompt>：发送任务并自动等待当前轮结果",
     "- 直接发送普通文本：发给当前活动会话",
     "- /screen -n <sessionId|listNumber> [-c <cursor>]：查看当前输出或增量输出",
     "- /read -n <sessionId|listNumber> -f <relativePath>：读取项目内文件",
-    "- /attach -i <codexSessionId> -w <workspace> [-n <name>]：接上指定历史对话",
-    "- /attach -last -w <workspace> [-n <name>]：接上最近一次历史对话",
+
     "- /enablePermission -n <sessionId|listNumber>：把会话切到 auto 执行档，适合需要自动放行的任务",
     "- /kill -n <sessionId|listNumber>：终止指定会话",
     "- /sys：查看宿主机状态",
@@ -259,6 +258,7 @@ function buildHelpMessage(config) {
     "补充说明：",
     "- /wait 已废弃，不需要再单独调用",
     "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
+    "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
     "- 如果远程任务会卡在本地审批提示，先执行 /enablePermission，或者直接调整 .env 里的执行档位配置",
     systemMode === "dry-run"
       ? "- 当前 /shutdown 仍是 dry-run，仅模拟执行，不会真正关机"
@@ -272,7 +272,6 @@ function formatCommandResponseMessage(response) {
 
   switch (response.actionId) {
     case "create":
-    case "attach":
     case "activate":
       return [
         response.summary,
@@ -637,10 +636,6 @@ export class AutomationAgent {
     switch (parsedCommand.commandKey) {
       case "create":
         return this.#handleCreate(parsedCommand.args, message);
-      case "attach":
-        return this.#handleAttach(parsedCommand.args, message);
-      case "attach-last":
-        return this.#handleAttach({ ...parsedCommand.args, last: true }, message);
       case "list":
         return this.#handleList(parsedCommand.args, message);
       case "projects":
@@ -674,69 +669,6 @@ export class AutomationAgent {
           { commandKey: parsedCommand.commandKey }
         );
     }
-  }
-
-  async #handleAttach(args, message) {
-    const workspaceRef = requireStringFlag(args, "w", "The -w flag is required for /attach.");
-    const explicitResumeId =
-      typeof args.i === "string" && args.i.trim() !== ""
-        ? args.i.trim()
-        : typeof args.id === "string" && args.id.trim() !== ""
-          ? args.id.trim()
-          : null;
-    const attachLast = args.last === true;
-
-    if (attachLast && explicitResumeId) {
-      throw new CommandValidationError(
-        "Use either -last or -i/-id for /attach, not both.",
-        "command_argument_invalid",
-        {
-          keys: ["last", "i", "id"]
-        }
-      );
-    }
-
-    if (!attachLast && !explicitResumeId) {
-      throw new CommandValidationError(
-        "Use /attach -last or /attach -i <codexSessionId> to bind an existing Codex conversation.",
-        "command_argument_missing",
-        {
-          keys: ["last", "i", "id"]
-        }
-      );
-    }
-
-    const projectName =
-      typeof args.n === "string" && args.n.trim() !== "" ? args.n.trim() : undefined;
-    const launchMode =
-      args.mode === "foreground-debug" ? "foreground-debug" : this.config.runtime.defaultLaunchMode;
-    const context = this.contextResolver.resolveProject({
-      workspaceRef,
-      projectName,
-      launchMode
-    });
-
-    const sessionId = this.sessionRepository.nextSessionId();
-    const attachedSession = this.sessionRepository.createSession({
-      sessionId,
-      ...context,
-      permissionMode: this.config.runtime.defaultPermissionMode,
-      driver: "exec-json",
-      codexThreadId: explicitResumeId,
-      codexResumeMode: attachLast ? "last" : null,
-      status: "ready"
-    });
-
-    this.#setActiveSessionBinding(message?.sourceId, sessionId);
-
-    return {
-      actionId: "attach",
-      summary: attachLast
-        ? `Attached session ${sessionId} to the most recent local Codex conversation.`
-        : `Attached session ${sessionId} to Codex conversation ${explicitResumeId}.`,
-      session: attachedSession,
-      resumeTarget: attachLast ? "last" : explicitResumeId
-    };
   }
 
   async #handleCreate(args, message) {
@@ -799,7 +731,7 @@ export class AutomationAgent {
   }
 
   async #handleActivate(args, message) {
-    const session = this.#requireSession(args, message);
+    const session = await this.#resolveSendSession(args, message);
 
     if (!isSessionAvailableStatus(session.status)) {
       throw new ContextResolutionError(
@@ -1407,7 +1339,7 @@ export class AutomationAgent {
       };
     } else {
       throw new ContextResolutionError(
-        `Codex conversation "${resolvedTargetRef}" is available locally, but no project workspace is currently selected. Create/select a project session first, or resend with /send -n ${targetRef} -w <projectPath> -m <prompt>.`,
+        `Codex conversation "${resolvedTargetRef}" is available locally, but no project workspace is currently selected. Create/select a project session first, or retry with -w <projectPath>.`,
         "workspace_missing_for_codex_conversation",
         { sessionId: targetRef }
       );
@@ -1436,7 +1368,7 @@ export class AutomationAgent {
     if (numberedSelection) {
       if (numberedSelection.type === "local") {
         throw new ContextResolutionError(
-          `Selection "${targetRef}" points to local Codex history, not a live managed session. Use /send -n ${targetRef} -m <prompt> to resume it first.`,
+          `Selection "${targetRef}" points to local Codex history, not a live managed session. Use /activate -n ${targetRef} or /send -n ${targetRef} -m <prompt> first.`,
           "session_unknown",
           { sessionId: targetRef, selectionType: "local" }
         );
@@ -1571,6 +1503,13 @@ export class AutomationAgent {
 export function createDefaultAgent(overrides = {}) {
   return new AutomationAgent(overrides);
 }
+
+
+
+
+
+
+
 
 
 

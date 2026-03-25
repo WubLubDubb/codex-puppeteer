@@ -18,11 +18,11 @@
 - Telegram 轮询入口、消息控制器、通知器与运行时配置
 - `Codex CLI` 主路径接入，支持 `codex exec --json` 与 `codex exec resume`
 - 可配置执行档位与可选 sandbox 覆盖
-- `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/attach -i`、`/attach -last`、`/enablePermission`、`/kill`、`/sys`
+- `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/kill`、`/sys`
 - `/list` 编号选择、历史会话聚合、普通文本自动路由到活动会话
 - 会话、任务、来源绑定持久化，以及运行时恢复
 - `/send` 单独即时 `/screen` 提示、1 小时默认等待窗口、输出语义分类优化
-- 自动化测试 `85/85` 通过
+- 自动化测试 `84/84` 通过
 
 ### 2.2 进行中
 
@@ -45,7 +45,7 @@
 | `TASK-104` | `FR-004` | 输出与文件访问 | 支持 `/screen`、`/read`、cursor 增量查看 | `src/session-repository.js`、`src/automation-agent.js` | 已完成 |
 | `TASK-105` | `FR-005` | 权限与干预 | 支持权限切换与终止会话 | `src/policy-engine.js`、`src/automation-agent.js` | 已完成 |
 | `TASK-106` | `FR-006` | 持久化与恢复 | 会话、任务、来源绑定落盘与恢复 | `src/*repository.js`、`src/runtime-recovery.js` | 已完成 |
-| `TASK-107` | `FR-006` | 历史对话续聊 | 支持 `/attach -i`、`/attach -last`、直接历史会话编号续聊 | `src/codex-adapter.js`、`src/automation-agent.js` | 已完成 |
+| `TASK-107` | `FR-006` | 历史对话续聊 | 支持通过 `/activate` 或 `/send` 直接接管历史会话 | `src/codex-adapter.js`、`src/automation-agent.js` | 已完成 |
 | `TASK-108` | `FR-007` | 列表与通知 | 支持 `/list` 聚合展示、编号模式、通知回传 | `src/automation-agent.js`、`src/telegram-notifier.js` | 已完成 |
 | `TASK-109` | `FR-007` | 帮助文本 | 支持 `/help`，并根据当前配置生成实际帮助内容 | `src/automation-agent.js`、测试 | 已完成 |
 | `TASK-110` | `FR-008` | 配置层 | 支持白名单目录、等待参数、驱动与系统模式配置 | `src/default-config.js`、`src/telegram-entry.js` | 已完成 |
@@ -59,7 +59,7 @@
 | 里程碑 | 目标 | 完成条件 | 当前状态 |
 | --- | --- | --- | --- |
 | `M1` | 核心远程控制打通 | 可以远程创建、发送、查看、读取、终止会话 | 已完成 |
-| `M2` | 历史会话与恢复 | 支持 attach、resume、重启后继续已有逻辑会话 | 已完成 |
+| `M2` | 历史会话与恢复 | 支持历史会话激活、resume、重启后继续已有逻辑会话 | 已完成 |
 | `M3` | 用户交互简化 | `/send` 自动等待，普通文本续聊，`/activate` 切换活动会话 | 已完成 |
 | `M4` | 帮助与可发现性 | `/help`、`/projects`、`/list` 让手机端可直接发现命令和项目 | 已完成 |
 | `M5` | 文档与测试统一 | 核心文档、README、状态摘要、自动化测试口径一致 | 已完成 |
@@ -112,3 +112,5 @@
 2. 逻辑会话、历史会话续聊、持久化与恢复已落地
 3. `/help`、`/send`、`/screen`、`/list`、`/activate` 等核心交互已统一到文档、实现和测试中
 4. 自动化测试通过，且剩余未完成事项被明确记录为后续工作，而不是混入“已交付”描述中
+
+

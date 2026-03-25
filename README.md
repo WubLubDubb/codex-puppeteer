@@ -26,12 +26,12 @@
 - `/projects`：列出允许根目录下的首层项目目录
 - `/create`：创建新的逻辑 Codex 会话
 - `/list`：同时展示托管会话和本机 Codex 历史对话，并生成编号
-- `/activate`：切换当前聊天绑定的活动会话
+- `/activate`：支持 `sessionId`、`/list` 编号或本机 `codexConversationId`；必要时可加 `-w <workspace>` 直接激活历史对话
 - `/send`：支持 `sessionId`、`/list` 编号或本机 `codexConversationId`，并自动等待当前轮结果
 - 普通文本续聊：直接发给当前活动会话
 - `/screen`：查看当前输出或按 cursor 查看增量输出
 - `/read`：读取绑定项目内文件
-- `/attach -i ...`、`/attach -last ...`：显式接入历史对话
+- 历史对话可直接通过 `/activate` 或 `/send` 接管
 - `/enablePermission`：把会话切到 auto 执行档，适合需要自动放行的任务
 - `/kill`：终止指定会话
 - `/sys`：查看宿主机摘要
@@ -57,11 +57,11 @@
 - `/projects`
 - `/create -n MyTask -w F:\project\YourProject`
 - `/list`
-- `/activate -n 1`
+- `/activate -n 1` 或 `/activate -n thread-123 -w F:\project\YourProject`
 - `/send -n session-0001 -m "请先扫描项目并总结目录结构"`
 - `/screen -n session-0001`
 - `/read -n session-0001 -f README.md`
-- `/attach -last -w F:\project\YourProject -n ResumeTask`
+- `/send -n thread-123 -m "继续上次开发"`
 - `/enablePermission -n session-0001`
 - `/kill -n session-0001`
 - `/sys`
@@ -97,7 +97,7 @@
 ## 当前验证状态
 
 - 主远程控制链路可用
-- 最新自动化验证：`npm test` => `85/85`
+- 最新自动化验证：`npm test` => `84/84`
 - Windows 为当前主要验证平台
 - 高风险系统动作默认保持 `dry-run`
 
@@ -106,3 +106,6 @@
 - `/wait` 已退役，不再是推荐用户命令；当前主流程是 `/send` + `/screen`
 - 如果任务会卡在本地审批提示，先执行 `/enablePermission`，或调整 `.env` 中的执行档位配置
 - WeCom 入口仍保留在代码中，但个人使用主路径已经切到 Telegram
+
+
+

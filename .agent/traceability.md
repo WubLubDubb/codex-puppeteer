@@ -2,7 +2,7 @@
 
 ## 当前追踪范围
 
-当前追踪基于 `2026-03-25` 的主线基线：项目已经从“微信控制 VS Code Codex”收敛为“Telegram 远程控制本机 Codex CLI”。追踪重点是远程控制主链路、历史会话续聊、持久化恢复，以及 `/help` 带来的命令可发现性。
+当前追踪基于 `2026-03-25` 的主线基线：项目已经从“微信控制 VS Code Codex”收敛为“Telegram 远程控制本机 Codex CLI”。追踪重点是远程控制主链路、历史会话通过 `/activate` 或 `/send` 接管、持久化恢复，以及 `/help` 带来的命令可发现性。
 
 ## 需求到设计、实现与验收映射
 
@@ -28,4 +28,6 @@
 - `FR-007` 补充 `/help` 为正式用户命令，并要求帮助内容必须反映运行时真实配置
 - 实现侧新增 `/help` 分发、帮助文本构建与返回格式化，落点在 `src/automation-agent.js`
 - 验证侧新增 `tests/message-parser.test.js` 与 `tests/automation-agent.test.js` 的 `/help` 用例
-- 最新整体回归结果：`npm test` => `85/85`
+- 最新整体回归结果：`npm test` => `84/84`
+
+
