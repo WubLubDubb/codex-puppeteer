@@ -87,12 +87,19 @@ class ControlledCodexAdapter {
     };
   }
 
-  async readFile({ relativePath }) {
+  async readFile({ absolutePath, relativePath }) {
     return {
       actionId: "read",
-      summary: `Read ${relativePath}.`,
+      summary: `Prepared ${relativePath} as an attachment.`,
       relativePath,
-      content: "fixture"
+      absolutePath,
+      fileName: "fixture.txt",
+      fileSizeBytes: 7,
+      attachment: {
+        kind: "document",
+        filePath: absolutePath,
+        fileName: "fixture.txt"
+      }
     };
   }
 }

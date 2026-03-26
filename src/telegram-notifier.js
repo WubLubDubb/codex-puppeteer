@@ -1,4 +1,4 @@
-import { AdapterExecutionError } from "./errors.js";
+﻿import { AdapterExecutionError } from "./errors.js";
 
 function now() {
   return new Date().toISOString();
@@ -6,6 +6,24 @@ function now() {
 
 function defaultFormatter(notification) {
   return notification.message;
+}
+
+function normalizeDocumentAttachment(attachment) {
+  if (attachment?.kind !== "document") {
+    return null;
+  }
+
+  const filePath = String(attachment.filePath ?? "").trim();
+  if (!filePath) {
+    return null;
+  }
+
+  const fileName = String(attachment.fileName ?? "").trim() || null;
+  return {
+    kind: "document",
+    filePath,
+    fileName
+  };
 }
 
 function splitMessageContent(content, maxMessageLength) {
@@ -72,12 +90,38 @@ export class TelegramBotNotifier {
     }
 
     const content = this.formatter(notification);
+    const attachment = normalizeDocumentAttachment(notification.attachment);
 
-    if (!content) {
+    if (!content && !attachment) {
       throw new AdapterExecutionError(
         "Telegram notifier formatter returned an empty message.",
         "telegram_notifier_content_empty"
       );
+    }
+
+    if (attachment) {
+      const remoteResult = await this.client.sendDocument({
+        chatId: recipient,
+        filePath: attachment.filePath,
+        fileName: attachment.fileName,
+        caption: content || undefined
+      });
+
+      const record = {
+        ...notification,
+        sentAt: now(),
+        remoteResult,
+        remoteResults: [
+          {
+            content: content || "",
+            attachment,
+            remoteResult
+          }
+        ],
+        chunkCount: 1
+      };
+      this.messages.push(record);
+      return structuredClone(record);
     }
 
     const messageChunks = splitMessageContent(content, this.maxMessageLength);

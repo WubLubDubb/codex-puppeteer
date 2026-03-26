@@ -687,7 +687,12 @@ export async function runCodexAdapterTests(runCase) {
 
     assert.equal(result.actionId, "read");
     assert.equal(result.relativePath, "README.md");
-    assert.match(result.content, /codex-puppeteer/i);
+    assert.equal(result.fileName, "README.md");
+    assert.match(result.absolutePath, /README\.md$/i);
+    assert.equal(typeof result.fileSizeBytes, "number");
+    assert.ok(result.fileSizeBytes > 0);
+    assert.equal(result.attachment.kind, "document");
+    assert.equal(result.attachment.filePath, result.absolutePath);
   });
 }
 

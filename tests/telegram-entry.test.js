@@ -88,12 +88,19 @@ class ControlledExecTelegramAdapter {
     };
   }
 
-  async readFile({ relativePath }) {
+  async readFile({ absolutePath, relativePath }) {
     return {
       actionId: "read",
-      summary: `Read ${relativePath}.`,
+      summary: `Prepared ${relativePath} as an attachment.`,
       relativePath,
-      content: "controlled telegram fixture"
+      absolutePath,
+      fileName: path.basename(absolutePath),
+      fileSizeBytes: 64,
+      attachment: {
+        kind: "document",
+        filePath: absolutePath,
+        fileName: path.basename(absolutePath)
+      }
     };
   }
 }
@@ -105,6 +112,9 @@ function createFakeTelegramClient() {
     },
     async sendMessage() {
       return { message_id: 1 };
+    },
+    async sendDocument() {
+      return { message_id: 2 };
     }
   };
 }

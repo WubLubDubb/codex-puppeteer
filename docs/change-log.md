@@ -7,18 +7,44 @@
 - `/send` 负责发送 prompt 并自动等待当前轮回复，默认内部等待窗口为 `3600000ms`，即 1 小时
 - `/send` 在开始执行后会立即单独返回一条推荐的 `/screen` 指令，最终完成消息只保留结果本身，减少 Telegram 长消息噪音
 - `/list` 已统一展示托管会话和本机可恢复的 Codex 历史会话，并支持编号选择；`/activate` 可切换当前聊天绑定的活动会话
+- `/ls`?`/find` ??? `/read` ??????????????????????????
 - Remote permission strategy is configurable: `safe`, `full-auto`, and `dangerous`; the current default mapping is `manual -> safe` and `auto -> dangerous`, so `/enablePermission` now truly opens the remote-friendly path
 - 会话、任务、来源绑定支持本地持久化；服务重启时会执行恢复与未完成任务中断标记
 - 高风险系统动作支持适配层与真实执行模式，但当前交付重点仍然是远程控制主链路，而不是关机联动
 
 ## 最近完成
 
+### 2026-03-26 lightweight browse commands
+
+- Added `/ls` for session-bound directory browsing with remembered current folder state.
+- Added `/find` for name-based project search and made the latest browse result reusable by `/ls -p <number>` and `/read -f <number>`.
+- Updated `/read` so direct paths are resolved against the current browse folder when present, while numbered selections download the matched file as an attachment.
+- Added automation coverage for directory browsing, search-result handoff, and invalid numbered `/read` directory selection handling.
+- Verification: `npm test` => `92/92`.
+
+### 2026-03-26 /read attachment delivery
+
+- `/read` no longer inlines file bodies into Telegram messages; it now returns the resolved project file as a document attachment.
+- `src/telegram-client.js` and `src/telegram-notifier.js` now support Telegram `sendDocument`, including the PowerShell fallback path used on blocked Windows hosts.
+- `src/codex-adapter.js` now returns file metadata for `/read`, and `src/automation-agent.js` forwards attachment metadata into the completion notification.
+- Tests updated across automation, adapter, Telegram client, and Telegram runtime coverage.
+- Verification: `npm test` => `89/89`.
+
+### 2026-03-25 Documentation Consistency Cleanup
+
+- Re-reviewed active docs against the current Telegram + Codex CLI implementation baseline.
+- Confirmed the current permission default remains `manual -> safe` and `auto -> dangerous`.
+- Bumped `docs/requirements.md` to `v1.4.3` and filled the missing `/disablePermission` scope coverage.
+- README, design, plan, acceptance, and state/traceability docs were checked again; only out-of-sync files were updated in this pass.
+
+
 ### 2026-03-25 Remote Permission Default Fix
 
-- Root cause confirmed: `/enablePermission` only switched a session to `auto`, but the old default `auto -> full-auto` could still be blocked by sandbox/network restrictions.
-- Default runtime behavior is now aligned to real remote usage: `manual -> safe`, `auto -> dangerous`.
-- Latest automated verification for this fix: `npm test` => `86/86`.
-- The override path remains available through `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`, so a host can still opt back into `full-auto` later.
+- Root cause confirmed: `/enablePermission` only switched a session to `auto`, but the old default `auto -> full-auto` could still be blocked by sandbox or network restrictions.
+- The default runtime policy is now aligned with real remote usage: `manual -> safe`, `auto -> dangerous`.
+- Automated verification for this fix: `npm test` => `86/86`.
+- The environment override remains available: `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE` can still be set back to `full-auto` on more conservative hosts.
+- Git release: `0d46ad8` was pushed to `origin/main`.
 
 
 ### 2026-03-25 `/help` 指令与文档同步
@@ -27,7 +53,7 @@
 - 帮助文本已对齐当前实际运行配置：允许根目录、默认等待时间、权限模式、执行档位、sandbox 与系统模式
 - 补充测试：`tests/message-parser.test.js` 与 `tests/automation-agent.test.js`
 - 同步回写 `README.md`、`docs/requirements.md`、`docs/system-design.md`、`docs/development-plan.md`、`docs/acceptance-report.md`、`.agent/current-state.md`、`.agent/traceability.md`
-- 最新自动化验证：`npm test` => `84/84`
+- Verification at that time: `npm test` => `84/84`
 - Git 发布：`0c083ea` 已成功推送到 `origin/main`
 
 ### 2026-03-24 近期基线能力
@@ -52,6 +78,7 @@
 
 ## 日志索引
 
+- `docs/dev-logs/2026/2026-03-26.md`
 - `docs/dev-logs/2026/2026-03-25.md`
 - `docs/dev-logs/2026/2026-03-24.md`
 - 历史阶段验收：`docs/acceptance-reports/`

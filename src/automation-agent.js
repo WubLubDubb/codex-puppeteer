@@ -147,6 +147,21 @@ function formatDiscoveredProjectLine(project) {
   return `- ${project.name}`;
 }
 
+function formatBrowseRelativePath(relativePath) {
+  const normalized = String(relativePath ?? "").trim().replace(/\\/g, "/");
+  return normalized ? normalized : "/";
+}
+
+function formatBrowseEntryLine(entry, { showRelativePath = false } = {}) {
+  const label = entry.type === "directory" ? "dir" : "file";
+  const targetPath = showRelativePath
+    ? formatBrowseRelativePath(entry.relativePath)
+    : entry.type === "directory"
+      ? `${entry.name}/`
+      : entry.name;
+  return `${entry.index}. [${label}] ${targetPath}`;
+}
+
 function truncateInlineText(value, maxLength = 120) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (!text) {
@@ -246,7 +261,9 @@ function buildHelpMessage(config) {
     "- /send -n <sessionId|codexConversationId|listNumber> -m <prompt>：发送任务并自动等待当前轮结果",
     "- 直接发送普通文本：发给当前活动会话",
     "- /screen -n <sessionId|listNumber> [-c <cursor>]：查看当前输出或增量输出",
-    "- /read -n <sessionId|listNumber> -f <relativePath>：读取项目内文件",
+    "- /ls [-n <sessionId|listNumber>] [-p <path|number|..|/>]????????????????",
+    "- /find [-n <sessionId|listNumber>] -q <keyword> [-p <path|number|..|/>]???????????",
+    "- /read [-n <sessionId|listNumber>] -f <path|number>?????????????????",
 
     "- /enablePermission -n <sessionId|listNumber>: switch the session to auto mode for approval/sandbox-blocked tasks; the actual auto profile is shown above",
     "- /disablePermission -n <sessionId|listNumber>：把会话切回 manual 执行档，恢复默认执行策略",
@@ -259,6 +276,7 @@ function buildHelpMessage(config) {
     "补充说明：",
     "- /wait 已废弃，不需要再单独调用",
     "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
+    "- /ls / /find ????????? /ls -p <number> ? /read -f <number> ????",
     "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
     "- If a remote task is blocked by local approvals or sandbox restrictions, run /enablePermission first; use /disablePermission to return to the default policy",
     systemMode === "dry-run"
@@ -342,6 +360,9 @@ function formatCommandResponseMessage(response) {
     }
     case "projects":
       return response.rendered ? truncateText(response.rendered) : response.summary;
+    case "ls":
+    case "find":
+      return response.rendered ? truncateText(response.rendered, 6000) : response.summary;
     case "help":
       return response.rendered ? truncateText(response.rendered, 6000) : response.summary;
     case "send": {
@@ -379,9 +400,7 @@ ${response.assistantText}`;
 
       return response.summary;
     case "read":
-      return response.content
-        ? `File ${response.relativePath}:\n${truncateText(response.content)}`
-        : response.summary;
+      return response.summary;
     case "sys":
       return formatSystemSnapshot(response.snapshot);
     default:
@@ -418,6 +437,7 @@ export class AutomationAgent {
     this.contextResolver = contextResolver;
     this.policyEngine = policyEngine;
     this.listSelections = new Map();
+    this.fileBrowseStates = new Map();
   }
 
   #parseIncomingMessage(message) {
@@ -523,8 +543,115 @@ export class AutomationAgent {
     return structuredClone(entry);
   }
 
+  #browseStateKey(sourceId, sessionId) {
+    const normalizedSourceId = String(sourceId ?? "").trim();
+    const normalizedSessionId = String(sessionId ?? "").trim();
+
+    if (!normalizedSourceId || !normalizedSessionId) {
+      return null;
+    }
+
+    return `${normalizedSourceId}::${normalizedSessionId}`;
+  }
+
+  #getBrowseState(sourceId, sessionId) {
+    const stateKey = this.#browseStateKey(sourceId, sessionId);
+    const state = stateKey ? this.fileBrowseStates.get(stateKey) : null;
+
+    return state
+      ? structuredClone(state)
+      : {
+          currentRelativePath: "",
+          selectionEntries: [],
+          mode: "ls",
+          query: null
+        };
+  }
+
+  #rememberBrowseState(sourceId, sessionId, browseState) {
+    const stateKey = this.#browseStateKey(sourceId, sessionId);
+
+    if (!stateKey) {
+      return;
+    }
+
+    const normalizedEntries = Array.isArray(browseState?.selectionEntries)
+      ? browseState.selectionEntries
+          .map((entry) => ({
+            index: Number(entry?.index ?? 0),
+            type: entry?.type === "directory" ? "directory" : "file",
+            name: entry?.name ? String(entry.name) : "",
+            relativePath: entry?.relativePath ? String(entry.relativePath).replace(/\\/g, "/") : ""
+          }))
+          .filter(
+            (entry) =>
+              Number.isInteger(entry.index) &&
+              entry.index > 0 &&
+              typeof entry.relativePath === "string" &&
+              entry.relativePath !== ""
+          )
+      : [];
+
+    this.fileBrowseStates.set(stateKey, {
+      currentRelativePath: String(browseState?.currentRelativePath ?? "").trim().replace(/\\/g, "/"),
+      selectionEntries: normalizedEntries,
+      mode: browseState?.mode === "find" ? "find" : "ls",
+      query: browseState?.query ? String(browseState.query) : null
+    });
+  }
+
+  #resolveBrowseSelection(targetRef, sourceId, sessionId) {
+    const normalizedTargetRef = String(targetRef ?? "").trim();
+
+    if (!/^\d+$/.test(normalizedTargetRef)) {
+      return null;
+    }
+
+    const browseState = this.#getBrowseState(sourceId, sessionId);
+
+    if (browseState.selectionEntries.length === 0) {
+      throw new ContextResolutionError(
+        `Numeric selection "${normalizedTargetRef}" is unavailable because there is no recent /ls or /find result for this chat. Run /ls or /find first.`,
+        "browse_selection_missing",
+        { selection: normalizedTargetRef }
+      );
+    }
+
+    const entry = browseState.selectionEntries.find(
+      (candidate) => candidate.index === Number(normalizedTargetRef)
+    );
+
+    if (!entry) {
+      throw new ContextResolutionError(
+        `Numeric selection "${normalizedTargetRef}" is not present in the latest /ls or /find result for this chat. Run /ls or /find again.`,
+        "browse_selection_missing",
+        { selection: normalizedTargetRef }
+      );
+    }
+
+    return structuredClone(entry);
+  }
+
+  #clearBrowseStateForSession(sessionId) {
+    const normalizedSessionId = String(sessionId ?? "").trim();
+
+    if (!normalizedSessionId) {
+      return;
+    }
+
+    for (const stateKey of this.fileBrowseStates.keys()) {
+      const separatorIndex = stateKey.lastIndexOf("::");
+      const keySessionId = separatorIndex >= 0 ? stateKey.slice(separatorIndex + 2) : "";
+
+      if (keySessionId === normalizedSessionId) {
+        this.fileBrowseStates.delete(stateKey);
+      }
+    }
+  }
+
   #clearBindingsForSession(sessionId) {
     this.sourceBindingRepository.clearBindingsForSession(sessionId);
+    this.#clearBrowseStateForSession(sessionId);
   }
 
   async receiveText(message) {
@@ -622,7 +749,8 @@ export class AutomationAgent {
         taskId,
         phase: "command.completed",
         sourceId: message.sourceId,
-        message: completionMessage
+        message: completionMessage,
+        attachment: response?.attachment ?? null
       });
 
       return this.repository.getTask(taskId);
@@ -641,6 +769,10 @@ export class AutomationAgent {
         return this.#handleList(parsedCommand.args, message);
       case "projects":
         return this.#handleProjects(parsedCommand.args);
+      case "ls":
+        return this.#handleLs(parsedCommand.args, message);
+      case "find":
+        return this.#handleFind(parsedCommand.args, message);
       case "help":
         return this.#handleHelp();
       case "activate":
@@ -881,6 +1013,159 @@ export class AutomationAgent {
     };
   }
 
+  #resolveBrowsePathReference(pathRef, message, session, browseState, commandKey) {
+    const normalizedPathRef = typeof pathRef === "string" && pathRef.trim() !== "" ? pathRef.trim() : null;
+
+    if (!normalizedPathRef) {
+      return {
+        pathRef: null,
+        baseRelativePath: browseState.currentRelativePath ?? ""
+      };
+    }
+
+    const browseSelection = this.#resolveBrowseSelection(
+      normalizedPathRef,
+      message?.sourceId,
+      session.sessionId
+    );
+
+    if (!browseSelection) {
+      return {
+        pathRef: normalizedPathRef,
+        baseRelativePath: browseState.currentRelativePath ?? ""
+      };
+    }
+
+    if (browseSelection.type !== "directory") {
+      throw new ContextResolutionError(
+        commandKey === "ls"
+          ? `Selection "${normalizedPathRef}" points to a file. Use /read -f ${normalizedPathRef} to download it.`
+          : `Selection "${normalizedPathRef}" points to a file. Use /read -f ${normalizedPathRef} to download it, or choose a directory number for /find.`,
+        "browse_selection_invalid",
+        { selection: normalizedPathRef, type: browseSelection.type, commandKey }
+      );
+    }
+
+    return {
+      pathRef: browseSelection.relativePath,
+      baseRelativePath: ""
+    };
+  }
+
+  async #handleLs(args, message) {
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "ls");
+    const browseState = this.#getBrowseState(message?.sourceId, session.sessionId);
+    const resolvedTarget = this.#resolveBrowsePathReference(
+      args.p,
+      message,
+      session,
+      browseState,
+      "ls"
+    );
+    const result = await this.contextResolver.listDirectory(session, resolvedTarget);
+    const selectionEntries = result.entries.map((entry, index) => ({
+      index: index + 1,
+      type: entry.type,
+      name: entry.name,
+      relativePath: entry.relativePath,
+      sizeBytes: entry.sizeBytes ?? null
+    }));
+
+    this.#rememberBrowseState(message?.sourceId, session.sessionId, {
+      currentRelativePath: result.directory.relativePath,
+      selectionEntries,
+      mode: "ls"
+    });
+
+    const renderedLines = [
+      `Directory ${session.sessionId} @ ${formatBrowseRelativePath(result.directory.relativePath)}:`,
+      ...(selectionEntries.length > 0
+        ? selectionEntries.map((entry) => formatBrowseEntryLine(entry))
+        : ["- (empty)"])
+    ];
+
+    if (result.omittedEntryCount > 0) {
+      renderedLines.push(`- +${result.omittedEntryCount} more item(s) not shown.`);
+    }
+
+    renderedLines.push(
+      "",
+      "Use /ls -p <number|..|/> to browse directories.",
+      "Use /read -f <number> to download a file from this list."
+    );
+
+    return {
+      actionId: "ls",
+      summary: `Listed ${selectionEntries.length} item(s) under ${formatBrowseRelativePath(result.directory.relativePath)}.`,
+      sessionId: session.sessionId,
+      directory: result.directory,
+      entries: selectionEntries,
+      totalEntryCount: result.totalEntryCount,
+      omittedEntryCount: result.omittedEntryCount,
+      rendered: renderedLines.join("\n")
+    };
+  }
+
+  async #handleFind(args, message) {
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "find");
+    const query = requireStringFlag(args, "q", "The -q flag is required for /find.");
+    const browseState = this.#getBrowseState(message?.sourceId, session.sessionId);
+    const resolvedTarget = this.#resolveBrowsePathReference(
+      args.p,
+      message,
+      session,
+      browseState,
+      "find"
+    );
+    const result = await this.contextResolver.findEntries(session, {
+      query,
+      ...resolvedTarget
+    });
+    const selectionEntries = result.entries.map((entry, index) => ({
+      index: index + 1,
+      type: entry.type,
+      name: entry.name,
+      relativePath: entry.relativePath,
+      sizeBytes: entry.sizeBytes ?? null
+    }));
+
+    this.#rememberBrowseState(message?.sourceId, session.sessionId, {
+      currentRelativePath: result.directory.relativePath,
+      selectionEntries,
+      mode: "find",
+      query
+    });
+
+    const renderedLines = [
+      `Matches for "${query}" under ${formatBrowseRelativePath(result.directory.relativePath)} (${selectionEntries.length}${result.limited ? "+" : ""}):`,
+      ...(selectionEntries.length > 0
+        ? selectionEntries.map((entry) => formatBrowseEntryLine(entry, { showRelativePath: true }))
+        : ["- (none)"])
+    ];
+
+    if (result.limited) {
+      renderedLines.push("- Result limit reached; refine the keyword or search from a narrower folder.");
+    }
+
+    renderedLines.push(
+      "",
+      "Use /ls -p <number> to open a directory from this result.",
+      "Use /read -f <number> to download a file from this result."
+    );
+
+    return {
+      actionId: "find",
+      summary: `Found ${selectionEntries.length}${result.limited ? "+" : ""} match(es) under ${formatBrowseRelativePath(result.directory.relativePath)}.`,
+      sessionId: session.sessionId,
+      directory: result.directory,
+      query,
+      entries: selectionEntries,
+      totalMatchCount: result.totalMatchCount,
+      limited: result.limited,
+      rendered: renderedLines.join("\n")
+    };
+  }
+
   async #handleSend(args, message, taskId = null) {
     const session = await this.#resolveSendSession(args, message);
     if (!isSessionAvailableStatus(session.status)) {
@@ -981,9 +1266,30 @@ export class AutomationAgent {
   }
 
   async #handleRead(args, message) {
-    const session = this.#requireSession(args, message);
-    const relativePath = requireStringFlag(args, "f", "The -f flag is required for /read.");
-    const fileRequest = this.contextResolver.resolveFileRequest(session, relativePath);
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "read");
+    const fileRef = requireStringFlag(args, "f", "The -f flag is required for /read.");
+    const browseState = this.#getBrowseState(message?.sourceId, session.sessionId);
+    const browseSelection = this.#resolveBrowseSelection(fileRef, message?.sourceId, session.sessionId);
+    let pathRef = fileRef;
+    let baseRelativePath = browseState.currentRelativePath ?? "";
+
+    if (browseSelection) {
+      if (browseSelection.type !== "file") {
+        throw new ContextResolutionError(
+          `Selection "${fileRef}" points to a directory. Use /ls -p ${fileRef} to open it, then choose a file number for /read.`,
+          "browse_selection_invalid",
+          { selection: fileRef, type: browseSelection.type, commandKey: "read" }
+        );
+      }
+
+      pathRef = browseSelection.relativePath;
+      baseRelativePath = "";
+    }
+
+    const fileRequest = this.contextResolver.resolveFileRequest(session, {
+      pathRef,
+      baseRelativePath
+    });
     const result = await this.codexAdapter.readFile(fileRequest);
 
     return {
@@ -991,7 +1297,10 @@ export class AutomationAgent {
       summary: result.summary,
       sessionId: session.sessionId,
       relativePath: result.relativePath,
-      content: result.content
+      absolutePath: result.absolutePath,
+      fileName: result.fileName,
+      fileSizeBytes: result.fileSizeBytes,
+      attachment: result.attachment ?? null
     };
   }
 
@@ -1280,6 +1589,36 @@ export class AutomationAgent {
     return this.systemAdapter.cancelShutdown();
   }
 
+  #requireManagedSessionOrActiveBinding(args, message, commandKey) {
+    if (typeof args?.n === "string" && args.n.trim() !== "") {
+      return this.#requireSession(args, message);
+    }
+
+    const sourceId = String(message?.sourceId ?? "").trim();
+    const binding = sourceId ? this.sourceBindingRepository.getBinding(sourceId) : null;
+
+    if (!binding?.sessionId) {
+      throw new CommandValidationError(
+        `No active session is currently bound for this source. Use /activate first, or pass -n <sessionId> to /${commandKey}.`,
+        "session_not_bound",
+        { sourceId, commandKey }
+      );
+    }
+
+    const session = this.sessionRepository.getSession(binding.sessionId);
+
+    if (!session) {
+      this.sourceBindingRepository.clearBinding(sourceId);
+      throw new CommandValidationError(
+        `The current session ${binding.sessionId} is no longer available. Use /list, /activate, or pass -n <sessionId> to /${commandKey}.`,
+        "session_not_bound",
+        { sourceId, sessionId: binding.sessionId, commandKey }
+      );
+    }
+
+    return session;
+  }
+
   async #resolveSendSession(args, message) {
     const targetRef = requireStringFlag(
       args,
@@ -1510,7 +1849,7 @@ export class AutomationAgent {
   }
 
   #adapterLabelForCommand(commandKey) {
-    if (["help", "sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
+    if (["help", "projects", "ls", "find", "read", "sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
       return "system";
     }
 

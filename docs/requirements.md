@@ -2,9 +2,9 @@
 
 ## 1. 文档概述
 
-- 文档版本：`v1.4.1`
+- Version: `v1.4.4`
 - 创建日期：`2026-03-20`
-- 更新日期：`2026-03-25`
+- 更新日期：`2026-03-26`
 - 当前状态：主线方案已经统一为“Telegram 远程控制 Codex CLI 会话”的 Windows 优先版本，WeCom 仅保留为兼容入口。
 
 ## 2. 项目背景与目标
@@ -44,7 +44,7 @@
 - 通过 Telegram 接收文本命令、校验来源、回传结果。
 - 在允许的项目根目录下创建新的逻辑 Codex 会话。
 - 接入本机已有的 Codex 历史对话，并继续发送 prompt。
-- 支持 `/help`、`/projects`、`/create`、`/list`、`/activate`、`/send`、`/screen`、`/read`、`/enablePermission`、`/kill`、`/sys` 等命令。
+- Supports `/help`, `/projects`, `/create`, `/list`, `/activate`, `/send`, `/screen`, `/ls`, `/find`, `/read`, `/enablePermission`, `/disablePermission`, `/kill`, and `/sys` commands.
 - 支持会话、任务、来源绑定的本地持久化与重启恢复。
 - 支持 `exec-json`、`pty`、`pipe` 等驱动抽象，其中 `exec-json` 为当前主路径。
 - Supports remote approval handling through execution profiles: `safe`, `full-auto`, and `dangerous`, with optional sandbox configuration; the current default maps `auto` to `dangerous` to reduce remote approval and network-sandbox blocking.
@@ -72,7 +72,9 @@
 | `/send -n <sessionId|codexConversationId|listNumber> -m <prompt>` | 发送 prompt，并自动等待当前轮回复 |
 | 直接发送普通文本 | 发给当前聊天已绑定的活动会话 |
 | `/screen -n <sessionId|listNumber> [-c <cursor>]` | 查看会话输出或增量输出 |
-| `/read -n <sessionId|listNumber> -f <relativePath>` | 读取绑定项目内文件 |
+| `/ls [-n <sessionId|listNumber>] [-p <path|number|..|/>]` | Browse the current directory or enter a numbered directory selection |
+| `/find [-n <sessionId|listNumber>] -q <keyword> [-p <path|number|..|/>]` | Search files or directories by name and return reusable numbered results |
+| `/read [-n <sessionId|listNumber>] -f <path|number>` | Returns the resolved project file as an attachment, supporting direct paths or the latest browse-result number |
 | `/enablePermission -n <sessionId|listNumber>` | Switch the session to auto mode; the current default maps `auto` to `dangerous` |
 | `/disablePermission -n <sessionId|listNumber>` | 把会话切回 manual 档位，恢复默认执行策略 |
 | `/kill -n <sessionId|listNumber>` | 终止指定会话 |
@@ -108,14 +110,15 @@
 - 前置条件：目标会话存在且可发送；若目标是历史会话，则必须能解析到合法项目上下文
 - 异常情况：会话不存在、状态不可发送、驱动异常、等待超时或没有完整回复时必须返回明确状态
 
-### FR-004 输出查看与项目文件读取
+### FR-004 Output Viewing, Lightweight Browsing, and Project File Reading
 
-- 名称：查看会话输出并读取绑定项目文件
-- 描述：系统必须支持查看会话缓冲输出、按 cursor 查看增量输出，并支持在绑定项目根目录内读取相对路径文件。
-- 输入：会话编号、cursor、输出行数、相对文件路径
-- 输出：输出文本、最新 cursor、文件内容、错误说明
-- 前置条件：会话存在；文件路径位于项目根目录内部
-- 异常情况：无输出、路径越界、文件不存在或读取失败时必须返回明确错误
+- Name: inspect session output, browse project directories, and safely return project files from the bound workspace.
+- Description: the system must support buffered output viewing, cursor-based incremental output, lightweight directory browsing for mobile use, name-based file search, and safe file access inside the bound project root.
+- Remote delivery model: `/read` returns the resolved project file as an attachment on the Telegram path instead of embedding the whole file body into the chat message.
+- Input: session id, cursor, output line limit, browse path or numbered selection, search keyword, and relative file path or numbered file selection.
+- Output: screen text, browse list text, numbered search results, latest cursor, file attachment metadata, and clear error details.
+- Preconditions: the session exists, the requested path stays inside the project root, and numbered selections come from the latest `/ls` or `/find` result in the same chat/session context.
+- Exceptions: empty output, path traversal, missing files, invalid numbered selections, or read failures must return explicit errors.
 
 ### FR-005 权限放行与人工干预
 
@@ -230,10 +233,9 @@
 
 ### AC-004
 
-- 对应需求：`FR-004`
-- 验收条件：`/screen` 支持查看完整或增量输出，`/read` 仅能读取项目根目录内文件。
-- 验收方式：自动化测试与路径边界验证。
-
+- Related requirement: `FR-004`
+- Acceptance condition: `/screen` supports full and incremental output viewing, `/ls` and `/find` support numbered mobile browsing, and `/read` only returns files inside the project root as attachments.
+- Verification: automated tests plus project-root boundary validation.
 ### AC-005
 
 - 对应需求：`FR-005`

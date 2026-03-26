@@ -124,12 +124,19 @@ class ControlledCodexAdapter {
     };
   }
 
-  async readFile({ relativePath }) {
+  async readFile({ absolutePath, relativePath }) {
     return {
       actionId: "read",
-      summary: `Read ${relativePath}.`,
+      summary: `Prepared ${relativePath} as an attachment.`,
       relativePath,
-      content: "codex-puppeteer controlled test fixture"
+      absolutePath,
+      fileName: path.basename(absolutePath),
+      fileSizeBytes: 128,
+      attachment: {
+        kind: "document",
+        filePath: absolutePath,
+        fileName: path.basename(absolutePath)
+      }
     };
   }
 }
@@ -466,6 +473,119 @@ export async function runAutomationAgentTests(runCase) {
     }
   });
 
+  await runCase("browses project directories from the active session and reads files relative to the current folder", async () => {
+    const workspaceRoot = createWorkspaceTempDir("codex-browse-");
+
+    try {
+      fs.mkdirSync(path.join(workspaceRoot, "docs"), { recursive: true });
+      fs.writeFileSync(path.join(workspaceRoot, "README.md"), "root readme\n");
+      fs.writeFileSync(path.join(workspaceRoot, "docs", "guide.md"), "guide body\n");
+
+      const config = buildAgentConfig();
+      config.security.allowedProjectRoots = [workspaceRoot];
+      config.projects = {};
+
+      const agent = createDefaultAgent({ config });
+      const createResult = await agent.receiveText(
+        buildMessage('/create -n BrowseDemo -w ' + workspaceRoot)
+      );
+
+      assert.equal(createResult.ok, true);
+
+      const lsRootResult = await agent.receiveText(buildMessage('/ls'));
+      assert.equal(lsRootResult.ok, true);
+      assert.equal(lsRootResult.task.response.actionId, 'ls');
+      assert.match(lsRootResult.task.resultSummary, /Directory .* @ \//i);
+
+      const docsEntry = lsRootResult.task.response.entries.find((entry) => entry.name === 'docs');
+      assert.ok(docsEntry);
+
+      const lsDocsResult = await agent.receiveText(buildMessage('/ls -p ' + docsEntry.index));
+      assert.equal(lsDocsResult.ok, true);
+      assert.equal(lsDocsResult.task.response.directory.relativePath, 'docs');
+      assert.match(lsDocsResult.task.resultSummary, /guide.md/i);
+
+      const readRelativeResult = await agent.receiveText(buildMessage('/read -f guide.md'));
+      assert.equal(readRelativeResult.ok, true);
+      assert.equal(readRelativeResult.task.response.relativePath, 'docs/guide.md');
+      assert.equal(readRelativeResult.notifications.at(-1).attachment.fileName, 'guide.md');
+
+      const guideEntry = lsDocsResult.task.response.entries.find((entry) => entry.name === 'guide.md');
+      assert.ok(guideEntry);
+
+      const readNumberResult = await agent.receiveText(buildMessage('/read -f ' + guideEntry.index));
+      assert.equal(readNumberResult.ok, true);
+      assert.equal(readNumberResult.task.response.relativePath, 'docs/guide.md');
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runCase("supports /find results as numbered browse targets for /ls and /read", async () => {
+    const workspaceRoot = createWorkspaceTempDir("codex-find-");
+
+    try {
+      fs.mkdirSync(path.join(workspaceRoot, "docs", "plans"), { recursive: true });
+      fs.writeFileSync(path.join(workspaceRoot, "docs", "plans", "guide.md"), "plan guide\n");
+      fs.writeFileSync(path.join(workspaceRoot, "docs", "notes.txt"), "notes\n");
+
+      const config = buildAgentConfig();
+      config.security.allowedProjectRoots = [workspaceRoot];
+      config.projects = {};
+
+      const agent = createDefaultAgent({ config });
+      await agent.receiveText(buildMessage('/create -n FindDemo -w ' + workspaceRoot));
+
+      const findDirectoryResult = await agent.receiveText(buildMessage('/find -q plans'));
+      assert.equal(findDirectoryResult.ok, true);
+      assert.equal(findDirectoryResult.task.response.actionId, 'find');
+      assert.match(findDirectoryResult.task.resultSummary, /Matches for "plans"/i);
+      assert.equal(findDirectoryResult.task.response.entries[0].type, 'directory');
+
+      const lsPlansResult = await agent.receiveText(buildMessage('/ls -p 1'));
+      assert.equal(lsPlansResult.ok, true);
+      assert.equal(lsPlansResult.task.response.directory.relativePath, 'docs/plans');
+
+      const findFileResult = await agent.receiveText(buildMessage('/find -q guide'));
+      assert.equal(findFileResult.ok, true);
+      assert.equal(findFileResult.task.response.entries.length, 1);
+      assert.equal(findFileResult.task.response.entries[0].relativePath, 'docs/plans/guide.md');
+
+      const readNumberResult = await agent.receiveText(buildMessage('/read -f 1'));
+      assert.equal(readNumberResult.ok, true);
+      assert.equal(readNumberResult.task.response.relativePath, 'docs/plans/guide.md');
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  await runCase("rejects /read numeric selections that point to directories", async () => {
+    const workspaceRoot = createWorkspaceTempDir("codex-read-dir-");
+
+    try {
+      fs.mkdirSync(path.join(workspaceRoot, "docs"), { recursive: true });
+      fs.writeFileSync(path.join(workspaceRoot, "README.md"), "root readme\n");
+
+      const config = buildAgentConfig();
+      config.security.allowedProjectRoots = [workspaceRoot];
+      config.projects = {};
+
+      const agent = createDefaultAgent({ config });
+      await agent.receiveText(buildMessage('/create -n RejectReadDir -w ' + workspaceRoot));
+
+      const lsResult = await agent.receiveText(buildMessage('/ls'));
+      const docsEntry = lsResult.task.response.entries.find((entry) => entry.name === 'docs');
+      assert.ok(docsEntry);
+
+      const readResult = await agent.receiveText(buildMessage('/read -f ' + docsEntry.index));
+      assert.equal(readResult.ok, false);
+      assert.equal(readResult.task.status, 'rejected');
+      assert.match(readResult.task.resultSummary, /Use \/ls -p/i);
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   await runCase("activates a local Codex conversation by /list number and routes plain text there", async () => {
     const adapter = new ControlledCodexAdapter({
       sendSessionStatus: 'ready',
@@ -695,7 +815,11 @@ export async function runAutomationAgentTests(runCase) {
     const readResult = await agent.receiveText(buildMessage(`/read -n ${sessionId} -f README.md`));
     assert.equal(readResult.ok, true);
     assert.equal(readResult.task.response.relativePath, "README.md");
-    assert.match(readResult.task.response.content, /codex-puppeteer/i);
+    assert.equal(readResult.task.response.fileName, "README.md");
+    assert.match(readResult.task.response.absolutePath, /README\.md$/i);
+    assert.equal(readResult.task.response.attachment.kind, "document");
+    assert.equal(readResult.notifications.at(-1).attachment.fileName, "README.md");
+    assert.match(readResult.task.resultSummary, /attachment/i);
   });
 
   await runCase("returns full assistant text beyond the default visible screen window and sends screen guidance separately", async () => {

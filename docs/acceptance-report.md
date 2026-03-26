@@ -37,7 +37,7 @@
 ## 4. 自动化验证结果
 
 - 执行命令：`npm test`
-- 最新结果：`86/86` 通过，`0` 失败
+- 最新结果：`92/92` 通过，`0` 失败
 - 覆盖重点：
   - 命令解析与参数校验
   - `/help` 运行时帮助文本
@@ -63,7 +63,7 @@
 | `/send` 开始后立即返回推荐 `/screen` 指令 | `FR-003` | 通过 | 即时通知与最终完成消息已拆分 |
 | 直接向历史 Codex 会话续聊 | `FR-006` | 通过 | 支持 `codexConversationId`、`/list` 编号和 `/activate` 路径 |
 | `/screen` 查看完整与增量输出 | `FR-004` | 通过 | 支持 cursor 增量查看 |
-| `/read` 读取项目内文件 | `FR-004` | 通过 | 路径边界校验有效 |
+| `/read` reads a project file | `FR-004` | Pass | path boundary validation plus Telegram attachment delivery |
 | Session permission toggling and kill control | `FR-005` | Pass | auto/manual state switching, the default `auto -> dangerous` path, and termination behavior are all verifiable |
 | 会话、任务、来源绑定持久化 | `FR-006` | 通过 | 文件持久化测试通过 |
 | 启动恢复与残留会话清理 | `FR-006` | 通过 | 未完成任务被标记为中断 |

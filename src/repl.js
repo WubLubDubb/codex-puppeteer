@@ -1,4 +1,4 @@
-import { createDefaultAgent } from "./automation-agent.js";
+﻿import { createDefaultAgent } from "./automation-agent.js";
 import readline from "node:readline";
 
 const agent = createDefaultAgent();
@@ -22,7 +22,10 @@ function printResponse(result) {
   }
 
   if (response.actionId === "read") {
-    console.log(response.content);
+    console.log(response.summary);
+    if (response.absolutePath) {
+      console.log(`attachment: ${response.absolutePath}`);
+    }
     return;
   }
 

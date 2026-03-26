@@ -10,7 +10,7 @@
 2. 启动或接上一个 Codex 会话
 3. 发送 prompt
 4. 等待当前轮输出
-5. 在手机端继续追踪、切换、续聊
+5. If you want to inspect project docs or files, run `/ls` or `/find -q <keyword>` first, then download with `/read -f <number>`.
 
 ## 当前主流程
 
@@ -18,7 +18,8 @@
 2. 发送 `/projects`
 3. 发送 `/create -n MyTask -w F:\project\YourProject`
 4. 发送 `/send -n session-0001 -m "请先扫描项目并总结目录结构"`
-5. 后续可以直接发送普通文本续聊；如果要切换项目，先执行 `/activate`
+5. If you want to inspect project docs or files, run `/ls` or `/find -q <keyword>` first, then download with `/read -f <number>`.
+6. After that you can keep chatting with plain text; if you want to switch projects, run `/activate` first.
 
 ## 当前能力
 
@@ -30,7 +31,9 @@
 - `/send`：支持 `sessionId`、`/list` 编号或本机 `codexConversationId`，并自动等待当前轮结果
 - 普通文本续聊：直接发给当前活动会话
 - `/screen`：查看当前输出或按 cursor 查看增量输出
-- `/read`：读取绑定项目内文件
+- `/ls`: browse the current session workspace and enter child folders with `/ls -p <number>`
+- `/find`: search files or directories by name and reuse the latest numbered result in `/ls` or `/read`
+- `/read`: send a workspace file back as an attachment, using either a relative path or the latest browse-result number
 - 历史对话可直接通过 `/activate` 或 `/send` 接管
 - `/enablePermission`: switch the session to auto mode; the current default maps auto to `dangerous` for approval/sandbox-blocked tasks
 - `/disablePermission`：把会话切回 manual 执行档，恢复默认执行策略
@@ -61,6 +64,9 @@
 - `/activate -n 1` 或 `/activate -n thread-123 -w F:\project\YourProject`
 - `/send -n session-0001 -m "请先扫描项目并总结目录结构"`
 - `/screen -n session-0001`
+- `/ls`
+- `/find -q requirements`
+- `/read -f 1`
 - `/read -n session-0001 -f README.md`
 - `/send -n thread-123 -m "继续上次开发"`
 - `/enablePermission -n session-0001`
@@ -70,7 +76,7 @@
 
 ## 常用脚本
 
-- `npm test`
+- Latest automated verification: `npm test` => `92/92`
 - `npm run tg:bot`
 - `npm run repl`
 - `npm run service`
@@ -99,7 +105,7 @@
 ## 当前验证状态
 
 - 主远程控制链路可用
-- 最新自动化验证：`npm test` => `86/86`
+- 最新自动化验证：`npm test` => `92/92`
 - Windows 为当前主要验证平台
 - 高风险系统动作默认保持 `dry-run`
 
@@ -109,6 +115,8 @@
 - If a task is blocked by local approvals or sandbox restrictions, run `/enablePermission` first; use `/disablePermission` to restore the default policy
 - WeCom 入口仍保留在代码中，但个人使用主路径已经切到 Telegram
 
+## Documentation Status
 
-
-
+- Active docs were re-reviewed on 2026-03-26 against the current Telegram + Codex CLI baseline.
+- No behavior change was introduced in this pass; the goal was to keep the written docs aligned with the implemented command set and runtime defaults.
+- /read now returns the resolved project file as a Telegram attachment instead of an inline text block.

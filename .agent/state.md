@@ -18,6 +18,7 @@
 - `/help` 按运行配置生成实际帮助文本
 - 会话、任务、来源绑定持久化与重启恢复
 - Execution profile switching with optional sandbox override; the current remote default is `manual -> safe` and `auto -> dangerous`
+- Active docs and state summaries were re-synchronized on 2026-03-26.
 
 ## 仍在推进
 

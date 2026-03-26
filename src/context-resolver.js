@@ -4,29 +4,22 @@ import path from "node:path";
 import { ContextResolutionError } from "./errors.js";
 
 const DEFAULT_PROJECT_LIST_LIMIT = 200;
+const DEFAULT_DIRECTORY_LIST_LIMIT = 200;
+const DEFAULT_FIND_LIMIT = 50;
+const FIND_SKIP_DIRECTORY_NAMES = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  ".next",
+  ".nuxt",
+  "__pycache__"
+]);
 
 function isInsideRoot(targetPath, rootPath) {
   const relative = path.relative(rootPath, targetPath);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function normalizeRelativePath(filePath) {
-  if (typeof filePath !== "string" || filePath.trim() === "") {
-    throw new ContextResolutionError(
-      "A relative file path is required.",
-      "file_path_missing"
-    );
-  }
-
-  if (path.isAbsolute(filePath) || filePath.split(/[\\/]/).includes("..")) {
-    throw new ContextResolutionError(
-      `File path "${filePath}" must stay inside the session project root.`,
-      "file_path_invalid",
-      { filePath }
-    );
-  }
-
-  return filePath.replace(/\\/g, "/");
 }
 
 function compareByName(left, right) {
@@ -34,6 +27,161 @@ function compareByName(left, right) {
     sensitivity: "base",
     numeric: true
   });
+}
+
+function compareDirectoryEntries(left, right) {
+  if (left.type !== right.type) {
+    return left.type === "directory" ? -1 : 1;
+  }
+
+  return compareByName(left, right);
+}
+
+function ensureProjectPathInsideRoot(session, relativePath, absolutePath, errorCode, errorPayload = {}) {
+  const projectRoot = path.resolve(session.projectRoot);
+
+  if (!isInsideRoot(absolutePath, projectRoot)) {
+    throw new ContextResolutionError(
+      `Path "${relativePath}" must stay inside the session project root.`,
+      errorCode,
+      errorPayload
+    );
+  }
+}
+
+function normalizeStoredRelativePath(relativePath) {
+  const normalized = String(relativePath ?? "").trim().replace(/\\/g, "/");
+
+  if (!normalized || normalized === ".") {
+    return "";
+  }
+
+  const trimmed = normalized.replace(/^\/+|\/+$/g, "");
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const resolved = path.posix.normalize(trimmed);
+
+  if (!resolved || resolved === ".") {
+    return "";
+  }
+
+  if (resolved === ".." || resolved.startsWith("../") || resolved.startsWith("/")) {
+    throw new ContextResolutionError(
+      `Path "${relativePath}" must stay inside the session project root.`,
+      "file_path_invalid",
+      { relativePath }
+    );
+  }
+
+  return resolved;
+}
+
+function resolveSessionRelativePath(pathRef, {
+  baseRelativePath = "",
+  defaultRelativePath = "",
+  missingMessage = "A relative file path is required."
+} = {}) {
+  const basePath = normalizeStoredRelativePath(baseRelativePath);
+  const fallbackPath = normalizeStoredRelativePath(defaultRelativePath);
+
+  if (pathRef === undefined || pathRef === null || String(pathRef).trim() === "") {
+    if (fallbackPath !== "") {
+      return fallbackPath;
+    }
+
+    if (defaultRelativePath === "") {
+      return "";
+    }
+
+    throw new ContextResolutionError(missingMessage, "file_path_missing");
+  }
+
+  const rawPathRef = String(pathRef).trim();
+
+  if (rawPathRef === "/" || rawPathRef === "\\") {
+    return "";
+  }
+
+  if (rawPathRef === ".") {
+    return basePath;
+  }
+
+  if (path.isAbsolute(rawPathRef)) {
+    throw new ContextResolutionError(
+      `Path "${pathRef}" must stay inside the session project root.`,
+      "file_path_invalid",
+      { pathRef }
+    );
+  }
+
+  const normalizedRef = rawPathRef.replace(/\\/g, "/");
+  const joinedPath = basePath
+    ? path.posix.normalize(path.posix.join(basePath, normalizedRef))
+    : path.posix.normalize(normalizedRef);
+
+  if (!joinedPath || joinedPath === ".") {
+    return "";
+  }
+
+  if (joinedPath === ".." || joinedPath.startsWith("../") || joinedPath.startsWith("/")) {
+    throw new ContextResolutionError(
+      `Path "${pathRef}" must stay inside the session project root.`,
+      "file_path_invalid",
+      { pathRef }
+    );
+  }
+
+  return normalizeStoredRelativePath(joinedPath);
+}
+
+function toEntryRecord({ absolutePath, name, relativePath, type, sizeBytes = null }) {
+  return {
+    name,
+    type,
+    relativePath,
+    absolutePath,
+    sizeBytes
+  };
+}
+
+async function describeDirectoryEntry(absolutePath, relativePath, dirent) {
+  const entryAbsolutePath = path.resolve(absolutePath, dirent.name);
+  const entryRelativePath = normalizeStoredRelativePath(
+    relativePath ? `${relativePath}/${dirent.name}` : dirent.name
+  );
+
+  if (dirent.isDirectory()) {
+    return toEntryRecord({
+      absolutePath: entryAbsolutePath,
+      name: dirent.name,
+      relativePath: entryRelativePath,
+      type: "directory"
+    });
+  }
+
+  if (dirent.isFile()) {
+    let sizeBytes = null;
+
+    try {
+      const stat = await fs.stat(entryAbsolutePath);
+      sizeBytes = stat.size;
+    } catch {
+      sizeBytes = null;
+    }
+
+    return toEntryRecord({
+      absolutePath: entryAbsolutePath,
+      name: dirent.name,
+      relativePath: entryRelativePath,
+      type: "file",
+      sizeBytes
+    });
+  }
+
+  return null;
 }
 
 export class ProjectContextResolver {
@@ -107,20 +255,195 @@ export class ProjectContextResolver {
     };
   }
 
-  resolveFileRequest(session, relativePath) {
-    const normalizedRelativePath = normalizeRelativePath(relativePath ?? session.defaultFile);
-    const absolutePath = path.resolve(session.projectRoot, normalizedRelativePath);
+  resolveDirectoryRequest(session, { pathRef = null, baseRelativePath = "" } = {}) {
+    const relativePath = resolveSessionRelativePath(pathRef, {
+      baseRelativePath,
+      defaultRelativePath: baseRelativePath
+    });
+    const absolutePath = path.resolve(session.projectRoot, relativePath || ".");
 
-    if (!isInsideRoot(absolutePath, path.resolve(session.projectRoot))) {
+    ensureProjectPathInsideRoot(session, relativePath, absolutePath, "directory_path_out_of_bounds", {
+      pathRef,
+      relativePath
+    });
+
+    return {
+      relativePath,
+      absolutePath,
+      parentRelativePath: relativePath
+        ? normalizeStoredRelativePath(path.posix.dirname(relativePath))
+        : "",
+      displayRelativePath: relativePath || "/"
+    };
+  }
+
+  async listDirectory(session, { pathRef = null, baseRelativePath = "", limit = DEFAULT_DIRECTORY_LIST_LIMIT } = {}) {
+    const directory = this.resolveDirectoryRequest(session, {
+      pathRef,
+      baseRelativePath
+    });
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_DIRECTORY_LIST_LIMIT;
+    let entries;
+
+    try {
+      const stat = await fs.stat(directory.absolutePath);
+      if (!stat.isDirectory()) {
+        throw new ContextResolutionError(
+          `Path "${directory.displayRelativePath}" is not a directory.`,
+          "directory_path_invalid",
+          { pathRef, relativePath: directory.relativePath }
+        );
+      }
+
+      entries = await fs.readdir(directory.absolutePath, { withFileTypes: true });
+    } catch (error) {
+      if (error instanceof ContextResolutionError) {
+        throw error;
+      }
+
       throw new ContextResolutionError(
-        `File path "${relativePath}" must stay inside the session project root.`,
-        "file_path_out_of_bounds",
-        { relativePath }
+        `Failed to list directory "${directory.displayRelativePath}": ${error.message}`,
+        "directory_list_failed",
+        { pathRef, relativePath: directory.relativePath }
       );
     }
 
+    const describedEntries = (await Promise.all(
+      entries.map((entry) => describeDirectoryEntry(directory.absolutePath, directory.relativePath, entry))
+    ))
+      .filter(Boolean)
+      .sort(compareDirectoryEntries);
+
     return {
-      relativePath: normalizedRelativePath,
+      directory,
+      entries: describedEntries.slice(0, safeLimit),
+      totalEntryCount: describedEntries.length,
+      omittedEntryCount: Math.max(0, describedEntries.length - safeLimit)
+    };
+  }
+
+  async findEntries(session, {
+    query,
+    pathRef = null,
+    baseRelativePath = "",
+    limit = DEFAULT_FIND_LIMIT
+  } = {}) {
+    const normalizedQuery = String(query ?? "").trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      throw new ContextResolutionError(
+        "The -q flag is required for /find.",
+        "find_query_missing"
+      );
+    }
+
+    const directory = this.resolveDirectoryRequest(session, {
+      pathRef,
+      baseRelativePath
+    });
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_FIND_LIMIT;
+    const matches = [];
+    const pending = [{
+      absolutePath: directory.absolutePath,
+      relativePath: directory.relativePath
+    }];
+    let limited = false;
+
+    while (pending.length > 0) {
+      const current = pending.shift();
+      let entries;
+
+      try {
+        entries = await fs.readdir(current.absolutePath, { withFileTypes: true });
+      } catch (error) {
+        throw new ContextResolutionError(
+          `Failed to search inside "${current.relativePath || "/"}": ${error.message}`,
+          "directory_search_failed",
+          { pathRef, relativePath: current.relativePath }
+        );
+      }
+
+      entries.sort(compareByName);
+
+      for (const entry of entries) {
+        const entryAbsolutePath = path.resolve(current.absolutePath, entry.name);
+        const entryRelativePath = normalizeStoredRelativePath(
+          current.relativePath ? `${current.relativePath}/${entry.name}` : entry.name
+        );
+        const entryType = entry.isDirectory() ? "directory" : entry.isFile() ? "file" : null;
+
+        if (!entryType) {
+          continue;
+        }
+
+        if (entry.name.toLowerCase().includes(normalizedQuery)) {
+          let sizeBytes = null;
+
+          if (entryType === "file") {
+            try {
+              const stat = await fs.stat(entryAbsolutePath);
+              sizeBytes = stat.size;
+            } catch {
+              sizeBytes = null;
+            }
+          }
+
+          matches.push(toEntryRecord({
+            absolutePath: entryAbsolutePath,
+            name: entry.name,
+            relativePath: entryRelativePath,
+            type: entryType,
+            sizeBytes
+          }));
+
+          if (matches.length >= safeLimit) {
+            limited = true;
+            break;
+          }
+        }
+
+        if (entryType === "directory" && !FIND_SKIP_DIRECTORY_NAMES.has(entry.name)) {
+          pending.push({
+            absolutePath: entryAbsolutePath,
+            relativePath: entryRelativePath
+          });
+        }
+      }
+
+      if (limited) {
+        break;
+      }
+    }
+
+    matches.sort(compareDirectoryEntries);
+
+    return {
+      directory,
+      entries: matches,
+      totalMatchCount: matches.length,
+      limited,
+      query: String(query ?? "").trim()
+    };
+  }
+
+  resolveFileRequest(session, relativePathOrOptions) {
+    const options =
+      typeof relativePathOrOptions === "object" && relativePathOrOptions !== null
+        ? relativePathOrOptions
+        : { pathRef: relativePathOrOptions };
+    const relativePath = resolveSessionRelativePath(options.pathRef ?? session.defaultFile, {
+      baseRelativePath: options.baseRelativePath ?? "",
+      defaultRelativePath: session.defaultFile ?? "",
+      missingMessage: "A relative file path is required."
+    });
+    const absolutePath = path.resolve(session.projectRoot, relativePath);
+
+    ensureProjectPathInsideRoot(session, relativePath, absolutePath, "file_path_out_of_bounds", {
+      relativePath: options.pathRef ?? session.defaultFile
+    });
+
+    return {
+      relativePath,
       absolutePath
     };
   }

@@ -1,4 +1,7 @@
-﻿import { execFile } from "node:child_process";
+﻿import fs from "node:fs/promises";
+import path from "node:path";
+import { Blob } from "node:buffer";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { AdapterExecutionError, ConfigurationError } from "./errors.js";
@@ -35,7 +38,48 @@ function escapeForPowerShellHereString(value) {
   return String(value ?? "").replace(/'@/g, "'@@");
 }
 
+function normalizeCaption(caption, maxLength = 1024) {
+  const text = String(caption ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
 function buildPowerShellTransportScript({ url, body }) {
+  if (body?.kind === "document") {
+    return [
+      "$ProgressPreference='SilentlyContinue'",
+      "$uri = @'",
+      escapeForPowerShellHereString(url),
+      "'@",
+      "$chatId = @'",
+      escapeForPowerShellHereString(String(body.chatId ?? "")),
+      "'@",
+      "$filePath = @'",
+      escapeForPowerShellHereString(String(body.filePath ?? "")),
+      "'@",
+      "$fileName = @'",
+      escapeForPowerShellHereString(String(body.fileName ?? "")),
+      "'@",
+      "$caption = @'",
+      escapeForPowerShellHereString(String(body.caption ?? "")),
+      "'@",
+      "$client = [System.Net.Http.HttpClient]::new()",
+      "$multipart = [System.Net.Http.MultipartFormDataContent]::new()",
+      "$multipart.Add([System.Net.Http.StringContent]::new($chatId), 'chat_id')",
+      "if ($caption) { $multipart.Add([System.Net.Http.StringContent]::new($caption, [System.Text.Encoding]::UTF8), 'caption') }",
+      "$fileBytes = [System.IO.File]::ReadAllBytes($filePath)",
+      "$fileContent = [System.Net.Http.ByteArrayContent]::new($fileBytes)",
+      "$multipart.Add($fileContent, 'document', $fileName)",
+      "$response = $client.PostAsync($uri, $multipart).GetAwaiter().GetResult()",
+      "$responseText = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()",
+      "$responseBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$responseText)",
+      "[Convert]::ToBase64String($responseBytes)"
+    ].join("\n");
+  }
+
   return [
     "$ProgressPreference='SilentlyContinue'",
     "$uri = @'",
@@ -74,6 +118,35 @@ function parsePowerShellTransportOutput(stdout) {
       "telegram_powershell_transport_failed"
     );
   }
+}
+
+async function parseApiResponse(method, response) {
+  if (!response?.ok) {
+    throw new AdapterExecutionError(
+      `Telegram API ${method} request failed with status ${response?.status ?? "unknown"}.`,
+      "telegram_http_error",
+      {
+        method,
+        status: response?.status ?? null
+      }
+    );
+  }
+
+  const result = await response.json();
+
+  if (!result?.ok) {
+    throw new AdapterExecutionError(
+      `Telegram API ${method} failed: ${result?.description ?? "Unknown error."}`,
+      "telegram_api_error",
+      {
+        method,
+        errorCode: result?.error_code ?? null,
+        description: result?.description ?? null
+      }
+    );
+  }
+
+  return result.result;
 }
 
 export function createPowerShellRunner({ execFileImpl = execFileAsync } = {}) {
@@ -148,6 +221,57 @@ export class TelegramBotClient {
     });
   }
 
+  async sendDocument({ chatId, filePath, fileName = null, caption = "" } = {}) {
+    const normalizedPath = String(filePath ?? "").trim();
+    if (!normalizedPath) {
+      throw new ConfigurationError(
+        "Telegram document file path is required.",
+        "telegram_document_path_missing"
+      );
+    }
+
+    const resolvedChatId = normalizeChatId(chatId);
+    const resolvedFileName = String(fileName ?? "").trim() || path.basename(normalizedPath);
+    const resolvedCaption = normalizeCaption(caption);
+    const url = `${this.apiBaseUrl}/bot${this.botToken}/sendDocument`;
+
+    if (this.transport === "powershell") {
+      return this.#callViaPowerShell("sendDocument", url, {
+        kind: "document",
+        chatId: resolvedChatId,
+        filePath: normalizedPath,
+        fileName: resolvedFileName,
+        caption: resolvedCaption
+      });
+    }
+
+    let fileBytes;
+    try {
+      fileBytes = await fs.readFile(normalizedPath);
+    } catch (error) {
+      throw new AdapterExecutionError(
+        `Failed to read Telegram document "${normalizedPath}": ${error?.message ?? "Unknown error."}`,
+        "telegram_document_read_failed",
+        { filePath: normalizedPath }
+      );
+    }
+
+    const form = new FormData();
+    form.set("chat_id", String(resolvedChatId));
+    if (resolvedCaption) {
+      form.set("caption", resolvedCaption);
+    }
+    form.set("document", new Blob([fileBytes]), resolvedFileName);
+
+    return this.#callMultipartApi("sendDocument", form, {
+      kind: "document",
+      chatId: resolvedChatId,
+      filePath: normalizedPath,
+      fileName: resolvedFileName,
+      caption: resolvedCaption
+    });
+  }
+
   async #callApi(method, payload) {
     const url = `${this.apiBaseUrl}/bot${this.botToken}/${method}`;
 
@@ -164,35 +288,40 @@ export class TelegramBotClient {
         body: JSON.stringify(payload)
       });
 
-      if (!response?.ok) {
-        throw new AdapterExecutionError(
-          `Telegram API ${method} request failed with status ${response?.status ?? "unknown"}.`,
-          "telegram_http_error",
-          {
-            method,
-            status: response?.status ?? null
-          }
-        );
-      }
-
-      const result = await response.json();
-
-      if (!result?.ok) {
-        throw new AdapterExecutionError(
-          `Telegram API ${method} failed: ${result?.description ?? "Unknown error."}`,
-          "telegram_api_error",
-          {
-            method,
-            errorCode: result?.error_code ?? null,
-            description: result?.description ?? null
-          }
-        );
-      }
-
-      return result.result;
+      return parseApiResponse(method, response);
     } catch (error) {
       if (this.transport === "auto" && shouldFallbackToPowerShell(error)) {
         return this.#callViaPowerShell(method, url, payload);
+      }
+
+      if (error instanceof AdapterExecutionError) {
+        throw error;
+      }
+
+      throw new AdapterExecutionError(
+        `Telegram API ${method} request failed: ${error?.message ?? "Unknown error."}`,
+        "telegram_http_error",
+        {
+          method,
+          causeCode: error?.cause?.code ?? null
+        }
+      );
+    }
+  }
+
+  async #callMultipartApi(method, body, powershellBody) {
+    const url = `${this.apiBaseUrl}/bot${this.botToken}/${method}`;
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: "POST",
+        body
+      });
+
+      return parseApiResponse(method, response);
+    } catch (error) {
+      if (this.transport === "auto" && shouldFallbackToPowerShell(error)) {
+        return this.#callViaPowerShell(method, url, powershellBody);
       }
 
       if (error instanceof AdapterExecutionError) {

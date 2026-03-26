@@ -239,10 +239,37 @@ export function supportsRealCodexControl({ env = process.env, platform = process
   return ["win32", "darwin", "linux"].includes(platform) && Boolean(resolveCodexCliCommand({ env }));
 }
 
-async function readUtf8File(absolutePath) {
+async function describeReadableFile(absolutePath, relativePath) {
   try {
-    return await fs.readFile(absolutePath, "utf8");
+    const stat = await fs.stat(absolutePath);
+
+    if (!stat.isFile()) {
+      throw new AdapterExecutionError(
+        `Path "${absolutePath}" is not a regular file.`,
+        "session_file_read_failed",
+        { absolutePath }
+      );
+    }
+
+    const fileName = path.basename(absolutePath);
+    return {
+      actionId: "read",
+      summary: `Prepared ${relativePath} as an attachment.`,
+      relativePath,
+      absolutePath,
+      fileName,
+      fileSizeBytes: stat.size,
+      attachment: {
+        kind: "document",
+        filePath: absolutePath,
+        fileName
+      }
+    };
   } catch (error) {
+    if (error instanceof AdapterExecutionError) {
+      throw error;
+    }
+
     throw new AdapterExecutionError(
       `Failed to read file "${absolutePath}": ${error.message}`,
       "session_file_read_failed",
@@ -437,14 +464,7 @@ export class SimulatedCodexAdapter {
   }
 
   async readFile({ absolutePath, relativePath }) {
-    const content = await readUtf8File(absolutePath);
-
-    return {
-      actionId: "read",
-      summary: `Read ${relativePath}.`,
-      relativePath,
-      content
-    };
+    return describeReadableFile(absolutePath, relativePath);
   }
 }
 
@@ -674,14 +694,7 @@ export class ExecCodexAdapter {
   }
 
   async readFile({ absolutePath, relativePath }) {
-    const content = await readUtf8File(absolutePath);
-
-    return {
-      actionId: "read",
-      summary: `Read ${relativePath}.`,
-      relativePath,
-      content
-    };
+    return describeReadableFile(absolutePath, relativePath);
   }
 
   #resolveExecutionStrategy(session) {
@@ -1002,14 +1015,7 @@ export class SubprocessCodexAdapter {
   }
 
   async readFile({ absolutePath, relativePath }) {
-    const content = await readUtf8File(absolutePath);
-
-    return {
-      actionId: "read",
-      summary: `Read ${relativePath}.`,
-      relativePath,
-      content
-    };
+    return describeReadableFile(absolutePath, relativePath);
   }
 
   #bindRuntime(sessionId, child, hooks) {
@@ -1311,14 +1317,7 @@ export class PtyCodexAdapter {
   }
 
   async readFile({ absolutePath, relativePath }) {
-    const content = await readUtf8File(absolutePath);
-
-    return {
-      actionId: "read",
-      summary: `Read ${relativePath}.`,
-      relativePath,
-      content
-    };
+    return describeReadableFile(absolutePath, relativePath);
   }
 
   #bindRuntime(sessionId, runtime, hooks) {

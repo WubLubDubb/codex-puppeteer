@@ -32,7 +32,7 @@
 | `FR-001` | 项目上下文解析、会话仓储、Codex 适配层 | 创建并绑定新的逻辑会话 |
 | `FR-002` | Telegram/WeCom 接入层、命令解析层、策略层 | 接收、鉴权并路由远程消息 |
 | `FR-003` | Automation Agent、Codex Adapter、输出分析层 | `/send` 自动等待与结果判断 |
-| `FR-004` | 会话输出缓冲层、文件访问层 | `/screen` 与 `/read` |
+| `FR-004` | Output buffer layer, file access layer, and lightweight browse layer | `/screen`, `/ls`, `/find`, and `/read` |
 | `FR-005` | 控制命令层、策略层 | `/enablePermission` 与 `/kill` |
 | `FR-006` | 持久化层、历史会话读取层、恢复层 | 历史会话激活、resume、重启恢复 |
 | `FR-007` | 列表与通知层、帮助文本生成层、系统探针层 | `/list`、`/activate`、`/help`、`/sys` |
@@ -104,10 +104,10 @@ Telegram Update
 
 ### 4.4 上下文与项目解析层
 
-- 职责：解析项目别名、允许根目录、文件相对路径与 `/projects` 目录发现
-- 输入：`-w` 参数、白名单目录、项目别名配置、相对文件路径
-- 输出：项目上下文、可读文件请求、项目目录列表
-- 依赖：`context-resolver.js`
+- Responsibility: resolve project aliases, allowed roots, relative file paths, lightweight browse requests, and `/projects` discovery.
+- Input: `-w` values, allowed roots, project alias config, relative file paths, and browse path or number references.
+- Output: project context, safe file requests, project directory lists, and search results.
+- Dependency: `context-resolver.js`
 
 ### 4.5 Automation Agent 编排层
 
@@ -118,10 +118,10 @@ Telegram Update
 
 ### 4.6 帮助文本与列表渲染层
 
-- 职责：根据当前运行配置生成 `/help`，并把 `/list`、`/projects` 等结果格式化成适合手机阅读的文本
-- 输入：运行时配置、托管会话、本机历史对话、项目目录发现结果
-- 输出：帮助文本、编号列表、项目目录清单
-- 依赖：`automation-agent.js`
+- Responsibility: generate `/help` and format `/list`, `/projects`, `/ls`, and `/find` output into mobile-friendly text.
+- Input: runtime config, managed sessions, local history, project listings, and browse results.
+- Output: help text, numbered lists, project listings, and search-result text.
+- Dependency: `automation-agent.js`
 
 ### 4.7 Codex 执行适配层
 
@@ -201,12 +201,13 @@ Telegram Update
 3. `/projects` 从允许根目录中发现首层目录，并生成适合手机端阅读的简洁列表
 4. 两个命令都不依赖活动会话，可作为新用户入口
 
-### 5.6 `/screen` 与 `/read` 流程
+### 5.6 `/screen` + browse + `/read` flow
 
-1. `/screen` 从会话仓储中读取缓冲输出；如指定 `-c <cursor>`，则只返回该 cursor 之后的新输出
-2. `/read` 通过上下文层校验相对路径必须位于项目根目录内，再调用适配层读取文件内容
-3. 通知层负责处理长消息分片回传
-
+1. `/screen` reads buffered session output from the repository and supports cursor-based incremental views with `-c <cursor>`.
+2. `/ls` uses the bound session plus browse-state context to list the current directory or enter a numbered directory selection.
+3. `/find` searches the current or specified directory for matching names and stores the numbered result set for follow-up `/ls -p <number>` or `/read -f <number>` actions.
+4. `/read` validates that the requested relative path stays inside the project root, resolves relative paths against the current browse directory when needed, and returns file metadata through the adapter layer instead of inlining the whole file body.
+5. The notifier layer sends a document attachment when the channel supports it and falls back to a short text summary otherwise.
 ### 5.7 启动恢复流程
 
 1. 运行时启动后加载会话、任务、来源绑定状态文件
@@ -253,7 +254,9 @@ Telegram Update
 | `/activate` | 会话编号、历史会话编号或列表编号，可选 `-w` | 当前聊天绑定切换结果 |
 | `/send` | 会话标识、prompt | assistant 输出或状态结果、cursor、即时 `/screen` 提示 |
 | `/screen` | 会话标识、cursor、行数 | 输出缓冲文本 |
-| `/read` | 会话标识、相对路径 | 文件内容 |
+| `/ls` | Optional session id plus path or number | Current directory listing and numbered results |
+| `/find` | Optional session id, keyword, plus path or number | Search results and numbered results |
+| `/read` | Optional session id plus relative path or number | attachment metadata |
 | `/enablePermission` | 会话标识 | 权限模式变更结果 |
 | `/disablePermission` | 会话标识 | 权限模式切回 manual 的结果 |
 | `/kill` | 会话标识 | 终止结果 |

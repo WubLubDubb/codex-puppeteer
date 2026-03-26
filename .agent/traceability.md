@@ -28,7 +28,14 @@
 - `FR-007` 补充 `/help` 为正式用户命令，并要求帮助内容必须反映运行时真实配置
 - 实现侧新增 `/help` 分发、帮助文本构建与返回格式化，落点在 `src/automation-agent.js`
 - 验证侧新增 `tests/message-parser.test.js` 与 `tests/automation-agent.test.js` 的 `/help` 用例
-- `FR-005` now uses the remote default mapping `manual -> safe`, `auto -> dangerous`, so permission switching matches the real Telegram remote-control requirement; latest overall regression result: `npm test` => `86/86`
+- `FR-005` now uses the remote default mapping `manual -> safe`, `auto -> dangerous`, so permission switching matches the real Telegram remote-control requirement; latest overall regression result: `npm test` => `92/92`
+- Active docs were re-reviewed again on 2026-03-25; no new traceability gap was introduced by the documentation cleanup.
 
 
 
+
+## 2026-03-26 update
+
+- `FR-004` remote delivery changed from inline file text to attachment-based `/read` replies on the Telegram path.
+- Implementation coverage now includes `src/telegram-client.js` and `src/telegram-notifier.js` for document delivery.
+- Latest overall regression result: `npm test` => `92/92`.

@@ -1,4 +1,6 @@
 ﻿import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import { createPowerShellRunner, TelegramBotClient } from "../src/telegram-client.js";
 import { TelegramBotNotifier } from "../src/telegram-notifier.js";
@@ -9,6 +11,21 @@ function createJsonResponse(payload) {
     status: 200,
     async json() {
       return payload;
+    }
+  };
+}
+
+function createTempDocument(fileName = "README.md", content = "telegram attachment fixture") {
+  const tempRoot = path.join(process.cwd(), "tmp");
+  fs.mkdirSync(tempRoot, { recursive: true });
+  const tempDir = fs.mkdtempSync(path.join(tempRoot, "telegram-client-"));
+  const filePath = path.join(tempDir, fileName);
+  fs.writeFileSync(filePath, content);
+  return {
+    tempDir,
+    filePath,
+    cleanup() {
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   };
 }
@@ -45,6 +62,39 @@ export async function runTelegramClientTests(runCase) {
     assert.match(calls[1].options.body, /hello telegram/);
   });
 
+  await runCase("uploads Telegram documents through multipart form-data", async () => {
+    const fixture = createTempDocument();
+
+    try {
+      const calls = [];
+      const client = new TelegramBotClient({
+        botToken: "bot-token-demo",
+        fetchImpl: async (url, options) => {
+          calls.push({ url, options });
+          return createJsonResponse({
+            ok: true,
+            result: { message_id: 123 }
+          });
+        }
+      });
+
+      const result = await client.sendDocument({
+        chatId: "42",
+        filePath: fixture.filePath,
+        caption: "Prepared README.md as an attachment."
+      });
+
+      assert.equal(result.message_id, 123);
+      assert.equal(calls.length, 1);
+      assert.match(calls[0].url, /\/sendDocument$/);
+      assert.equal(calls[0].options.body.get("chat_id"), "42");
+      assert.equal(calls[0].options.body.get("caption"), "Prepared README.md as an attachment.");
+      assert.equal(calls[0].options.body.get("document").name, "README.md");
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   await runCase("falls back to PowerShell transport when Windows fetch is blocked", async () => {
     const client = new TelegramBotClient({
       botToken: "bot-token-demo",
@@ -69,6 +119,46 @@ export async function runTelegramClientTests(runCase) {
     assert.equal(result.via, "powershell");
     assert.match(result.url, /\/sendMessage$/);
     assert.equal(result.echoedText, "hello through powershell");
+  });
+
+  await runCase("falls back to PowerShell transport for Telegram document uploads", async () => {
+    const fixture = createTempDocument();
+
+    try {
+      const client = new TelegramBotClient({
+        botToken: "bot-token-demo",
+        fetchImpl: async () => {
+          const error = new TypeError("fetch failed");
+          error.cause = { code: "EACCES" };
+          throw error;
+        },
+        transport: "auto",
+        powershellRunner: async ({ url, body }) => ({
+          ok: true,
+          result: {
+            via: "powershell",
+            url,
+            filePath: body.filePath,
+            fileName: body.fileName,
+            caption: body.caption
+          }
+        })
+      });
+
+      const result = await client.sendDocument({
+        chatId: "42",
+        filePath: fixture.filePath,
+        caption: "Prepared README.md as an attachment."
+      });
+
+      assert.equal(result.via, "powershell");
+      assert.match(result.url, /\/sendDocument$/);
+      assert.equal(result.filePath, fixture.filePath);
+      assert.equal(result.fileName, "README.md");
+      assert.equal(result.caption, "Prepared README.md as an attachment.");
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   await runCase("decodes UTF-8 Telegram updates from PowerShell transport", async () => {
@@ -123,5 +213,41 @@ export async function runTelegramClientTests(runCase) {
     assert.ok(client.sent.length >= 2);
     assert.equal(record.chunkCount, client.sent.length);
     assert.equal(client.sent[0].chatId, "42");
+  });
+
+  await runCase("sends attachment notifications as Telegram documents", async () => {
+    const fixture = createTempDocument();
+
+    try {
+      const client = {
+        sentDocuments: [],
+        async sendDocument(payload) {
+          this.sentDocuments.push(payload);
+          return { message_id: this.sentDocuments.length };
+        }
+      };
+      const notifier = new TelegramBotNotifier({ client });
+
+      const record = await notifier.send({
+        taskId: "task-tg-2",
+        phase: "command.completed",
+        sourceId: "42",
+        message: "Prepared README.md as an attachment.",
+        attachment: {
+          kind: "document",
+          filePath: fixture.filePath,
+          fileName: "README.md"
+        }
+      });
+
+      assert.equal(client.sentDocuments.length, 1);
+      assert.equal(client.sentDocuments[0].chatId, "42");
+      assert.equal(client.sentDocuments[0].filePath, fixture.filePath);
+      assert.equal(client.sentDocuments[0].fileName, "README.md");
+      assert.equal(record.chunkCount, 1);
+      assert.equal(record.remoteResults[0].attachment.fileName, "README.md");
+    } finally {
+      fixture.cleanup();
+    }
   });
 }
