@@ -559,6 +559,50 @@ export async function runAutomationAgentTests(runCase) {
     }
   });
 
+  await runCase("navigates back to parent folders and project root with /ls -p .. and /ls -p /", async () => {
+    const workspaceRoot = createWorkspaceTempDir("codex-parent-");
+
+    try {
+      fs.mkdirSync(path.join(workspaceRoot, "docs", "plans"), { recursive: true });
+      fs.writeFileSync(path.join(workspaceRoot, "docs", "plans", "guide.md"), "guide\n");
+
+      const config = buildAgentConfig();
+      config.security.allowedProjectRoots = [workspaceRoot];
+      config.projects = {};
+
+      const agent = createDefaultAgent({ config });
+      await agent.receiveText(buildMessage('/create -n ParentDemo -w ' + workspaceRoot));
+
+      const lsRootResult = await agent.receiveText(buildMessage('/ls'));
+      const docsEntry = lsRootResult.task.response.entries.find((entry) => entry.name === 'docs');
+      assert.ok(docsEntry);
+
+      const lsDocsResult = await agent.receiveText(buildMessage('/ls -p ' + docsEntry.index));
+      assert.equal(lsDocsResult.ok, true);
+      assert.equal(lsDocsResult.task.response.directory.relativePath, 'docs');
+
+      const plansEntry = lsDocsResult.task.response.entries.find((entry) => entry.name === 'plans');
+      assert.ok(plansEntry);
+
+      const lsPlansResult = await agent.receiveText(buildMessage('/ls -p ' + plansEntry.index));
+      assert.equal(lsPlansResult.ok, true);
+      assert.equal(lsPlansResult.task.response.directory.relativePath, 'docs/plans');
+
+      const backToDocsResult = await agent.receiveText(buildMessage('/ls -p ..'));
+      assert.equal(backToDocsResult.ok, true);
+      assert.equal(backToDocsResult.task.response.directory.relativePath, 'docs');
+
+      const backToRootResult = await agent.receiveText(buildMessage('/ls -p /'));
+      assert.equal(backToRootResult.ok, true);
+      assert.equal(backToRootResult.task.response.directory.relativePath, '');
+
+      const stayAtRootResult = await agent.receiveText(buildMessage('/ls -p ..'));
+      assert.equal(stayAtRootResult.ok, true);
+      assert.equal(stayAtRootResult.task.response.directory.relativePath, '');
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
   await runCase("rejects /read numeric selections that point to directories", async () => {
     const workspaceRoot = createWorkspaceTempDir("codex-read-dir-");
 

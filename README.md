@@ -10,7 +10,7 @@
 2. 启动或接上一个 Codex 会话
 3. 发送 prompt
 4. 等待当前轮输出
-5. If you want to inspect project docs or files, run `/ls` or `/find -q <keyword>` first, then download with `/read -f <number>`.
+5. 如需查看项目文档或源码文件，可先用 `/ls` 或 `/find -q <keyword>` 定位，再通过 `/read -f <number>` 下载附件。
 
 ## 当前主流程
 
@@ -18,8 +18,8 @@
 2. 发送 `/projects`
 3. 发送 `/create -n MyTask -w F:\project\YourProject`
 4. 发送 `/send -n session-0001 -m "请先扫描项目并总结目录结构"`
-5. If you want to inspect project docs or files, run `/ls` or `/find -q <keyword>` first, then download with `/read -f <number>`.
-6. After that you can keep chatting with plain text; if you want to switch projects, run `/activate` first.
+5. 如需查看项目文档或源码文件，可先用 `/ls` 或 `/find -q <keyword>` 定位，再通过 `/read -f <number>` 下载附件。
+6. 之后可以直接发送普通文本继续对话；如果想切到另一个项目，先执行 `/activate`。
 
 ## 当前能力
 
@@ -31,11 +31,11 @@
 - `/send`：支持 `sessionId`、`/list` 编号或本机 `codexConversationId`，并自动等待当前轮结果
 - 普通文本续聊：直接发给当前活动会话
 - `/screen`：查看当前输出或按 cursor 查看增量输出
-- `/ls`: browse the current session workspace and enter child folders with `/ls -p <number>`
-- `/find`: search files or directories by name and reuse the latest numbered result in `/ls` or `/read`
-- `/read`: send a workspace file back as an attachment, using either a relative path or the latest browse-result number
+- `/ls`：浏览当前会话工作目录，并通过 `/ls -p <number>` 进入子目录
+- `/find`：按名称搜索文件或目录，搜索结果编号可继续用于 `/ls` 或 `/read`
+- `/read`：把工作区文件作为附件返回，支持相对路径或最近浏览结果编号
 - 历史对话可直接通过 `/activate` 或 `/send` 接管
-- `/enablePermission`: switch the session to auto mode; the current default maps auto to `dangerous` for approval/sandbox-blocked tasks
+- `/enablePermission`：把会话切到 auto 模式；当前默认会映射到 `dangerous`，适合处理远程开发中的审批或 sandbox 阻塞
 - `/disablePermission`：把会话切回 manual 执行档，恢复默认执行策略
 - `/kill`：终止指定会话
 - `/sys`：查看宿主机摘要
@@ -46,14 +46,15 @@
 ## 快速开始
 
 1. 安装依赖：`npm install`
-2. 复制并填写 `.env`
-3. 至少配置以下参数：
+2. 打开 `.env.example` 并填写你自己的 key
+3. 运行时会优先读取 `.env`，如果 `.env` 不存在就自动回退到 `.env.example`
+4. 至少配置以下参数：
    - `TG_BOT_TOKEN`
    - `TG_ALLOWED_CHAT_IDS`
    - `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
-4. 确认本机可以在命令行直接执行 `codex`
-5. 启动运行时：`npm run tg:bot`
-6. 在 Telegram 中发送 `/help`
+5. 确认本机可以在命令行直接执行 `codex`
+6. 启动运行时：`npm run tg:bot`
+7. 在 Telegram 中发送 `/help`
 
 ## 常用命令
 
@@ -76,7 +77,7 @@
 
 ## 常用脚本
 
-- Latest automated verification: `npm test` => `92/92`
+- 最新自动化验证：`npm test` => `95/95`
 - `npm run tg:bot`
 - `npm run repl`
 - `npm run service`
@@ -84,7 +85,7 @@
 
 ## 关键配置
 
-完整参数见 `.env.example`。
+完整参数见 `.env.example`。如果你更希望把个人配置和仓库模板分开，也可以手动复制一份为 `.env`；程序会优先使用 `.env`。
 
 常用项：
 
@@ -94,7 +95,7 @@
 - `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
 - `CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE`
 - `CODEX_PUPPETEER_CODEX_EXEC_PROFILE`
-- `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`: execution profile used by `auto`; the current default is `dangerous`, and you can set it back to `full-auto` if needed
+- `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`：`auto` 模式对应的执行档；当前默认是 `dangerous`，如需更保守可改回 `full-auto`
 - `CODEX_PUPPETEER_CODEX_SANDBOX`
 - `CODEX_PUPPETEER_STORAGE_DIR`
 - `CODEX_PUPPETEER_LOG_DIR`
@@ -105,18 +106,13 @@
 ## 当前验证状态
 
 - 主远程控制链路可用
-- 最新自动化验证：`npm test` => `92/92`
+- 最新自动化验证：`npm test` => `95/95`
 - Windows 为当前主要验证平台
 - 高风险系统动作默认保持 `dry-run`
 
 ## 说明
 
 - `/wait` 已退役，不再是推荐用户命令；当前主流程是 `/send` + `/screen`
-- If a task is blocked by local approvals or sandbox restrictions, run `/enablePermission` first; use `/disablePermission` to restore the default policy
+- 如果任务被本地审批或 sandbox 限制阻塞，可先执行 `/enablePermission`；处理完后再用 `/disablePermission` 恢复默认策略
 - WeCom 入口仍保留在代码中，但个人使用主路径已经切到 Telegram
-
-## Documentation Status
-
-- Active docs were re-reviewed on 2026-03-26 against the current Telegram + Codex CLI baseline.
-- No behavior change was introduced in this pass; the goal was to keep the written docs aligned with the implemented command set and runtime defaults.
-- /read now returns the resolved project file as a Telegram attachment instead of an inline text block.
+- 开源仓库默认公开 `README.md`、源码、测试、配置模板和必要的代理规范文件；`docs/` 与 `.agent/` 作为本地私有工作资料保留在你的机器上，不再建议公开

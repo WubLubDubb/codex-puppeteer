@@ -1,4 +1,4 @@
-﻿import fs from "node:fs/promises";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { Blob } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -47,62 +47,215 @@ function normalizeCaption(caption, maxLength = 1024) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
-function buildPowerShellTransportScript({ url, body }) {
-  if (body?.kind === "document") {
-    return [
-      "$ProgressPreference='SilentlyContinue'",
-      "$uri = @'",
-      escapeForPowerShellHereString(url),
-      "'@",
-      "$chatId = @'",
-      escapeForPowerShellHereString(String(body.chatId ?? "")),
-      "'@",
-      "$filePath = @'",
-      escapeForPowerShellHereString(String(body.filePath ?? "")),
-      "'@",
-      "$fileName = @'",
-      escapeForPowerShellHereString(String(body.fileName ?? "")),
-      "'@",
-      "$caption = @'",
-      escapeForPowerShellHereString(String(body.caption ?? "")),
-      "'@",
-      "$client = [System.Net.Http.HttpClient]::new()",
-      "$multipart = [System.Net.Http.MultipartFormDataContent]::new()",
-      "$multipart.Add([System.Net.Http.StringContent]::new($chatId), 'chat_id')",
-      "if ($caption) { $multipart.Add([System.Net.Http.StringContent]::new($caption, [System.Text.Encoding]::UTF8), 'caption') }",
-      "$fileBytes = [System.IO.File]::ReadAllBytes($filePath)",
-      "$fileContent = [System.Net.Http.ByteArrayContent]::new($fileBytes)",
-      "$multipart.Add($fileContent, 'document', $fileName)",
-      "$response = $client.PostAsync($uri, $multipart).GetAwaiter().GetResult()",
-      "$responseText = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()",
-      "$responseBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$responseText)",
-      "[Convert]::ToBase64String($responseBytes)"
-    ].join("\n");
+function formatPowerShellDiagnostic(value, maxLength = 500) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+
+  if (!text) {
+    return "";
   }
 
-  return [
-    "$ProgressPreference='SilentlyContinue'",
-    "$uri = @'",
-    escapeForPowerShellHereString(url),
-    "'@",
-    "$json = @'",
-    escapeForPowerShellHereString(JSON.stringify(body)),
-    "'@",
-    "$requestBody = [System.Text.Encoding]::UTF8.GetBytes($json)",
-    "$response = Invoke-RestMethod -Uri $uri -Method Post -ContentType 'application/json; charset=utf-8' -Body $requestBody",
-    "$responseJson = $response | ConvertTo-Json -Depth 20 -Compress",
-    "$responseBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$responseJson)",
-    "[Convert]::ToBase64String($responseBytes)"
-  ].join("\n");
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
-function parsePowerShellTransportOutput(stdout) {
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+  ".txt",
+  ".md",
+  ".markdown",
+  ".mdx",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".ini",
+  ".cfg",
+  ".conf",
+  ".env",
+  ".xml",
+  ".csv",
+  ".tsv",
+  ".html",
+  ".htm",
+  ".css",
+  ".scss",
+  ".less",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".java",
+  ".kt",
+  ".kts",
+  ".gradle",
+  ".properties",
+  ".py",
+  ".rb",
+  ".php",
+  ".go",
+  ".rs",
+  ".c",
+  ".cc",
+  ".cpp",
+  ".cxx",
+  ".h",
+  ".hpp",
+  ".cs",
+  ".swift",
+  ".sql",
+  ".sh",
+  ".ps1",
+  ".bat",
+  ".cmd",
+  ".log",
+  ".rst"
+]);
+
+const TEXT_ATTACHMENT_BASENAMES = new Set([
+  "readme",
+  "license",
+  "changelog",
+  "dockerfile",
+  ".gitignore",
+  ".npmrc",
+  ".editorconfig"
+]);
+
+function isLikelyTextAttachment(filePath, fileName = null) {
+  const targetName = String(fileName ?? path.basename(String(filePath ?? ""))).trim().toLowerCase();
+  if (!targetName) {
+    return false;
+  }
+
+  const extension = path.extname(targetName);
+  if (extension && TEXT_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return true;
+  }
+
+  if (!extension && TEXT_ATTACHMENT_BASENAMES.has(targetName)) {
+    return true;
+  }
+
+  return false;
+}
+function buildPowerShellTransportScript({ url, body }) {
+  if (body?.kind === "document") {
+    const textUpload = "true";
+    return `
+$ProgressPreference='SilentlyContinue'
+$ErrorActionPreference='Stop'
+$uri = @'
+${escapeForPowerShellHereString(url)}
+'@
+$chatId = @'
+${escapeForPowerShellHereString(String(body.chatId ?? ""))}
+'@
+$filePath = @'
+${escapeForPowerShellHereString(String(body.filePath ?? ""))}
+'@
+$fileName = @'
+${escapeForPowerShellHereString(String(body.fileName ?? ""))}
+'@
+$caption = @'
+${escapeForPowerShellHereString(String(body.caption ?? ""))}
+'@
+$textUpload = @'
+${escapeForPowerShellHereString(textUpload)}
+'@
+try {
+  $responseText = ''
+  $transportErrors = @()
+  if ($textUpload -eq 'true') {
+    try {
+      Add-Type -AssemblyName System.Net.Http
+      $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
+      $httpClient = New-Object System.Net.Http.HttpClient
+      $multipart = New-Object System.Net.Http.MultipartFormDataContent
+      $chatIdContent = New-Object System.Net.Http.StringContent -ArgumentList @([string]$chatId, [System.Text.Encoding]::UTF8)
+      $multipart.Add($chatIdContent, 'chat_id')
+      if ($caption) {
+        $captionContent = New-Object System.Net.Http.StringContent -ArgumentList @([string]$caption, [System.Text.Encoding]::UTF8)
+        $multipart.Add($captionContent, 'caption')
+      }
+      $documentContent = New-Object System.Net.Http.ByteArrayContent -ArgumentList (,$fileBytes)
+      $documentContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/octet-stream')
+      $multipart.Add($documentContent, 'document', $fileName)
+      $response = $httpClient.PostAsync($uri, $multipart).GetAwaiter().GetResult()
+      $responseText = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+      if (-not $response.IsSuccessStatusCode) {
+        throw ('HTTP ' + [int]$response.StatusCode + ' ' + [string]$response.ReasonPhrase + ': ' + [string]$responseText)
+      }
+    } catch {
+      $transportErrors += ('text-multipart=' + [string]($_.Exception.Message))
+      $responseText = ''
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$responseText)) {
+    $curlCandidates = @(Get-Command curl.exe -All -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source | Select-Object -Unique)
+    if ($curlCandidates.Count -eq 0) { $curlCandidates = @('curl.exe') }
+    foreach ($curlPath in $curlCandidates) {
+      foreach ($networkFlag in @('-4', '')) {
+        $arguments = @('-sS', '-X', 'POST')
+        if ($networkFlag) { $arguments += $networkFlag }
+        $arguments += $uri
+        $arguments += '--form-string'; $arguments += ('chat_id=' + $chatId)
+        if ($caption) { $arguments += '--form-string'; $arguments += ('caption=' + $caption) }
+        $arguments += '-F'
+        $arguments += ('document=@' + $filePath + ';filename=' + $fileName)
+        $curlOutput = & $curlPath @arguments 2>&1
+        $curlText = ($curlOutput | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $curlText) {
+          $responseText = $curlText
+          break
+        }
+        $transportErrors += (($curlPath + ' ' + $networkFlag + ': ' + $curlText).Trim())
+      }
+      if ($responseText) { break }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$responseText)) {
+    if ($transportErrors.Count -gt 0) { throw ($transportErrors -join ' | ') }
+    throw 'Telegram PowerShell document transport produced an empty response.'
+  }
+  $responseBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$responseText)
+  [Convert]::ToBase64String($responseBytes)
+} catch {
+  [Console]::Error.WriteLine([string]($_.Exception.Message))
+  exit 1
+}`;
+  }
+
+  return `
+$ProgressPreference='SilentlyContinue'
+$ErrorActionPreference='Stop'
+$uri = @'
+${escapeForPowerShellHereString(url)}
+'@
+$json = @'
+${escapeForPowerShellHereString(JSON.stringify(body))}
+'@
+try {
+  $requestBody = [System.Text.Encoding]::UTF8.GetBytes($json)
+  $response = Invoke-RestMethod -Uri $uri -Method Post -ContentType 'application/json; charset=utf-8' -Body $requestBody
+  $responseJson = $response | ConvertTo-Json -Depth 20 -Compress
+  $responseBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$responseJson)
+  [Convert]::ToBase64String($responseBytes)
+} catch {
+  [Console]::Error.WriteLine([string]($_.Exception.Message))
+  exit 1
+}`;
+}
+function parsePowerShellTransportOutput(stdout, stderr = "") {
   const raw = String(stdout ?? "").trim();
+  const stderrSummary = formatPowerShellDiagnostic(stderr);
 
   if (!raw) {
     throw new AdapterExecutionError(
-      "Telegram PowerShell transport returned an empty payload.",
-      "telegram_powershell_transport_failed"
+      stderrSummary
+        ? `Telegram PowerShell transport returned an empty payload. ${stderrSummary}`
+        : "Telegram PowerShell transport returned an empty payload.",
+      "telegram_powershell_transport_failed",
+      stderrSummary ? { stderr: stderrSummary } : {}
     );
   }
 
@@ -114,8 +267,11 @@ function parsePowerShellTransportOutput(stdout) {
     return JSON.parse(jsonText);
   } catch (error) {
     throw new AdapterExecutionError(
-      `Telegram PowerShell transport returned unreadable JSON: ${error?.message ?? "Unknown error."}`,
-      "telegram_powershell_transport_failed"
+      stderrSummary
+        ? `Telegram PowerShell transport returned unreadable JSON: ${error?.message ?? "Unknown error."} ${stderrSummary}`
+        : `Telegram PowerShell transport returned unreadable JSON: ${error?.message ?? "Unknown error."}`,
+      "telegram_powershell_transport_failed",
+      stderrSummary ? { stderr: stderrSummary } : {}
     );
   }
 }
@@ -154,7 +310,7 @@ export function createPowerShellRunner({ execFileImpl = execFileAsync } = {}) {
     const script = buildPowerShellTransportScript({ url, body });
 
     try {
-      const { stdout } = await execFileImpl(
+      const { stdout, stderr } = await execFileImpl(
         "powershell.exe",
         ["-NoProfile", "-NonInteractive", "-Command", script],
         {
@@ -162,15 +318,25 @@ export function createPowerShellRunner({ execFileImpl = execFileAsync } = {}) {
           maxBuffer: 1024 * 1024 * 10
         }
       );
-      return parsePowerShellTransportOutput(stdout);
+      return parsePowerShellTransportOutput(stdout, stderr);
     } catch (error) {
       if (error instanceof AdapterExecutionError) {
         throw error;
       }
 
+      const stderrSummary = formatPowerShellDiagnostic(error?.stderr);
+      const stdoutSummary = formatPowerShellDiagnostic(error?.stdout);
+      const diagnostic = stderrSummary || stdoutSummary || "";
+
       throw new AdapterExecutionError(
-        `Telegram PowerShell transport failed: ${error?.message ?? "Unknown error."}`,
-        "telegram_powershell_transport_failed"
+        diagnostic
+          ? `Telegram PowerShell transport failed: ${diagnostic}`
+          : `Telegram PowerShell transport failed: ${error?.message ?? "Unknown error."}`,
+        "telegram_powershell_transport_failed",
+        {
+          stderr: stderrSummary || null,
+          stdout: stdoutSummary || null
+        }
       );
     }
   };
@@ -241,7 +407,8 @@ export class TelegramBotClient {
         chatId: resolvedChatId,
         filePath: normalizedPath,
         fileName: resolvedFileName,
-        caption: resolvedCaption
+        caption: resolvedCaption,
+        textUpload: isLikelyTextAttachment(normalizedPath, resolvedFileName)
       });
     }
 
@@ -268,7 +435,8 @@ export class TelegramBotClient {
       chatId: resolvedChatId,
       filePath: normalizedPath,
       fileName: resolvedFileName,
-      caption: resolvedCaption
+      caption: resolvedCaption,
+      textUpload: isLikelyTextAttachment(normalizedPath, resolvedFileName)
     });
   }
 

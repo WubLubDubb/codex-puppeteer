@@ -160,6 +160,7 @@ export async function runTelegramEntryTests(runCase) {
     assert.equal(config.runtime.codexSandboxMode, "danger-full-access");
     assert.equal(config.runtime.defaultWaitTimeoutMs, 180000);
     assert.equal(config.runtime.defaultSendWaitTimeoutMs, 480000);
+    assert.deepEqual(config.service.envFiles, [".env", ".env.example"]);
     assert.match(config.runtime.sessionsFilePath, /sessions\.json$/);
     assert.match(config.runtime.tasksFilePath, /tasks\.json$/);
     assert.match(config.runtime.sourceBindingsFilePath, /source-bindings\.json$/);

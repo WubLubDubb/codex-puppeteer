@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -188,6 +188,77 @@ export async function runTelegramClientTests(runCase) {
     const updates = await client.getUpdates({ offset: 12, timeout: 5 });
 
     assert.equal(updates[0].message.text, "请先扫描当前项目，并总结 package.json 里的 scripts。");
+  });
+
+  await runCase("uses curl.exe for PowerShell document uploads on Windows hosts", async () => {
+    const fixture = createTempDocument();
+
+    try {
+      let capturedScript = "";
+      const stdout = `${Buffer.from(JSON.stringify({ ok: true, result: { message_id: 321 } }), "utf8").toString("base64")}\r\n`;
+      const powershellRunner = createPowerShellRunner({
+        execFileImpl: async (_command, args) => {
+          capturedScript = args[3];
+          return { stdout, stderr: "" };
+        }
+      });
+      const client = new TelegramBotClient({
+        botToken: "bot-token-demo",
+        transport: "powershell",
+        powershellRunner
+      });
+
+      const result = await client.sendDocument({
+        chatId: "42",
+        filePath: fixture.filePath,
+        caption: "Prepared README.md as an attachment."
+      });
+
+      assert.equal(result.message_id, 321);
+      assert.match(capturedScript, /Add-Type -AssemblyName System\.Net\.Http/);
+      assert.match(capturedScript, /ReadAllBytes\(\$filePath\)/);
+      assert.match(capturedScript, /MultipartFormDataContent/);
+      assert.match(capturedScript, /text-multipart=/);
+      assert.match(capturedScript, /ByteArrayContent/);
+      assert.match(capturedScript, /Get-Command curl\.exe -All/);
+      assert.match(capturedScript, /--form-string/);
+      assert.match(capturedScript, /document=@/);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await runCase("surfaces PowerShell stderr when Telegram document upload returns no payload", async () => {
+    const fixture = createTempDocument();
+
+    try {
+      const powershellRunner = createPowerShellRunner({
+        execFileImpl: async () => ({
+          stdout: "",
+          stderr: "ConstrainedLanguage blocked document upload"
+        })
+      });
+      const client = new TelegramBotClient({
+        botToken: "bot-token-demo",
+        transport: "powershell",
+        powershellRunner
+      });
+
+      await assert.rejects(
+        () => client.sendDocument({
+          chatId: "42",
+          filePath: fixture.filePath,
+          caption: "Prepared README.md as an attachment."
+        }),
+        (error) => {
+          assert.equal(error.code, "telegram_powershell_transport_failed");
+          assert.match(error.message, /ConstrainedLanguage blocked document upload/);
+          return true;
+        }
+      );
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   await runCase("splits long Telegram notification content into multiple messages", async () => {

@@ -1,4 +1,4 @@
-﻿import fs from "node:fs/promises";
+import fs from "node:fs/promises";
 import path from "node:path";
 
 import { ContextResolutionError } from "./errors.js";
@@ -123,6 +123,10 @@ function resolveSessionRelativePath(pathRef, {
     : path.posix.normalize(normalizedRef);
 
   if (!joinedPath || joinedPath === ".") {
+    return "";
+  }
+
+  if (joinedPath === ".." && basePath === "") {
     return "";
   }
 

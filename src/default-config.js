@@ -33,7 +33,7 @@ export const defaultConfig = {
   service: {
     serviceName: "wxcodex-agent",
     logDir: `${workspaceRoot}/.agent/logs`,
-    envFiles: [".env"],
+    envFiles: [".env", ".env.example"],
     notifyOnFatal: true
   },
   projects: {
@@ -42,12 +42,6 @@ export const defaultConfig = {
       projectName: "demo",
       rootPath: workspaceRoot,
       defaultFile: "README.md"
-    },
-    docs: {
-      alias: "docs",
-      projectName: "docs",
-      rootPath: `${workspaceRoot}/docs`,
-      defaultFile: "requirements.md"
     }
   },
   wecom: {

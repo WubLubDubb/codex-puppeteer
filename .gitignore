@@ -1,31 +1,59 @@
-﻿# OS and editor files
+# OS and editor files
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+*.swp
+*.swo
 
 # Environment and secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+.npmrc
+.pnpmrc
+.yarnrc
+.yarnrc.yml
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
 
 # Logs
 *.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # Common dependency and build directories
 node_modules/
 dist/
 coverage/
+.nyc_output/
+.cache/
 
-# Runtime state
+# Local databases and pid files
+*.db
+*.sqlite
+*.sqlite-*
+*.pid
+*.pid.lock
+*.seed
+
+# Runtime state and local artifacts
+.agent/
+docs/
 .agent/runtime/
 .agent/logs/
 .agent/testing/
 .agent/tmp/
-.agent/logs-probe/
-.agent/logs-probe-2/
-.agent/runtime-probe/
-.agent/runtime-probe-2/
+.agent/logs-probe*/
+.agent/runtime-probe*/
 
 # Temporary probes and local notes
 tmp/
