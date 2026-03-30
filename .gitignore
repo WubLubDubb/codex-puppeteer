@@ -48,6 +48,7 @@ coverage/
 # Runtime state and local artifacts
 .agent/
 docs/
+tests/
 .agent/runtime/
 .agent/logs/
 .agent/testing/

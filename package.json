@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Local chat-driven Codex automation workflows for personal and managed use.",
   "scripts": {
-    "test": "node tests/run-tests.js",
+    "test": "node scripts/test-entry.js",
     "demo": "node src/cli.js",
     "wecom:server": "node src/wecom-entry.js",
     "tg:bot": "node src/telegram-entry.js",
