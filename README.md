@@ -247,9 +247,8 @@ npm run wecom:server
 - `README.md`
 - `.env.example`
 - `src/`
-- `agent-specs/`
 
-本地私有资料例如 `docs/`、`.agent/`、`tests/` 不作为公开使用前提，也不会作为公开仓库默认内容。
+本地私有资料例如 `docs/`、`.agent/`、`tests/`、`AGENTS.md`、`agent-specs/` 不作为公开使用前提，也不会作为公开仓库默认内容。
 
 ## 后续可扩展方向
 

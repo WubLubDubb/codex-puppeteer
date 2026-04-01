@@ -49,6 +49,8 @@ coverage/
 .agent/
 docs/
 tests/
+AGENTS.md
+agent-specs/
 .agent/runtime/
 .agent/logs/
 .agent/testing/
