@@ -59,6 +59,23 @@ function parseOptionalNonNegativeIntegerFlag(args, key, message) {
   return value;
 }
 
+function parseOptionalPositiveIntegerFlag(args, key, message) {
+  if (args[key] === undefined) {
+    return null;
+  }
+
+  const value = Number(args[key]);
+
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new CommandValidationError(message, "command_argument_invalid", {
+      key,
+      value: args[key]
+    });
+  }
+
+  return value;
+}
+
 function isSessionExecutionStatus(status) {
   return status === "starting" || status === "running";
 }
@@ -250,6 +267,24 @@ function formatWaitMinutes(ms) {
   return String(Math.max(1, Math.round(value / 60000)));
 }
 
+function paginateSelectionEntries(entries, page, pageSize) {
+  const normalizedEntries = Array.isArray(entries) ? entries : [];
+  const normalizedPageSize = Number.isInteger(pageSize) && pageSize > 0 ? pageSize : 8;
+  const totalItems = normalizedEntries.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / normalizedPageSize));
+  const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  const startIndex = (currentPage - 1) * normalizedPageSize;
+  const endIndex = startIndex + normalizedPageSize;
+
+  return {
+    pageEntries: normalizedEntries.slice(startIndex, endIndex),
+    totalItems,
+    totalPages,
+    currentPage,
+    pageSize: normalizedPageSize
+  };
+}
+
 function buildHelpMessage(config) {
   const allowedRoots = Array.isArray(config?.security?.allowedProjectRoots)
     ? config.security.allowedProjectRoots.filter((entry) => String(entry ?? "").trim() !== "")
@@ -293,17 +328,17 @@ function buildHelpMessage(config) {
     "",
     "命令列表：",
     "- /help：查看当前帮助",
-    "- /projects [-w <allowedRoot>]：列出允许根目录下的项目文件夹，结果带编号",
+    "- /projects [-w <allowedRoot>] [-pg <page>]：列出允许根目录下的项目文件夹，结果带编号",
     "- /create -n <name> -w <workspace|projectNumber>：创建新会话",
-    "- /list [-a] [-c <count>]：查看托管会话和本机 Codex 历史对话",
+    "- /list [-a] [-c <count>] [-pg <page>]：查看托管会话和本机 Codex 历史对话",
     "- /activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]：切换当前聊天绑定的活动会话",
     "- /current：查看当前活动会话、项目路径、浏览目录和权限状态",
     "- /mode [auto|manual] [-n <sessionId|listNumber>]：查看或切换权限模式；省略 -n 时默认当前活动会话",
     "- /send [-n <sessionId|codexConversationId|listNumber>] -m <prompt>：发送任务并自动等待当前轮结果",
     "- 直接发送普通文本：发给当前活动会话",
     "- /screen [-n <sessionId|listNumber>] [-c <cursor>]：查看当前输出或增量输出；已绑定活动会话时可省略 -n",
-    "- /ls [-n <sessionId|listNumber>] [-p <path|number|..|/>]：浏览当前目录或进入指定子目录",
-    "- /find [-n <sessionId|listNumber>] -q <keyword> [-p <path|number|..|/>]：搜索文件或目录",
+    "- /ls [-n <sessionId|listNumber>] [-p <path|number|..|/>] [-pg <page>]：浏览当前目录或进入指定子目录",
+    "- /find [-n <sessionId|listNumber>] -q <keyword> [-p <path|number|..|/>] [-pg <page>]：搜索文件或目录",
     "- /read [-n <sessionId|listNumber>] -f <path|number>：按路径或编号下载文件",
     "- /enablePermission -n <sessionId|listNumber>：把会话切到 auto 模式，适合处理审批或 sandbox 阻塞",
     "- /disablePermission -n <sessionId|listNumber>：把会话切回 manual 执行档，恢复默认执行策略",
@@ -326,6 +361,7 @@ function buildHelpMessage(config) {
     "- /send 支持简写：/s 3 继续开发；当前会话已激活时也可直接 /s 继续开发",
     "- /mode auto 与 /mode manual 默认作用于当前激活会话，也可用 /mode auto 3 指定编号",
     "- /ls 和 /find 的结果都支持编号；可直接用 /ls -p <number> 或 /read -f <number>",
+    "- /projects、/list、/ls、/find 的按钮支持上一页 / 下一页；也可手动输入 -pg <page>",
     "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
     "- 如果远程任务被本地审批或 sandbox 限制阻塞，可先执行 /enablePermission，处理完后再 /disablePermission",
     systemMode === "dry-run"
@@ -481,6 +517,10 @@ function formatCommandResponseMessage(response) {
         }
       }
 
+      if ((response.buttonTotalPages ?? 1) > 1) {
+        sections.push(`Buttons page: ${response.buttonPage ?? 1}/${response.buttonTotalPages}.`);
+      }
+
       return sections.join("\n");
     }
     case "projects":
@@ -565,6 +605,7 @@ export class AutomationAgent {
     this.policyEngine = policyEngine;
     this.listSelections = new Map();
     this.projectSelections = new Map();
+    this.projectListStates = new Map();
     this.fileBrowseStates = new Map();
   }
 
@@ -642,7 +683,7 @@ export class AutomationAgent {
     this.listSelections.set(normalizedSourceId, normalizedEntries);
   }
 
-  #rememberProjectSelections(sourceId, selectionEntries) {
+  #rememberProjectSelections(sourceId, selectionEntries, { workspaceRef = null } = {}) {
     if (typeof sourceId !== "string" || sourceId.trim() === "") {
       return;
     }
@@ -665,6 +706,21 @@ export class AutomationAgent {
       : [];
 
     this.projectSelections.set(normalizedSourceId, normalizedEntries);
+    this.projectListStates.set(normalizedSourceId, {
+      workspaceRef:
+        typeof workspaceRef === "string" && workspaceRef.trim() !== ""
+          ? workspaceRef.trim()
+          : null
+    });
+  }
+
+  #getRememberedProjectWorkspaceRef(sourceId) {
+    const normalizedSourceId = String(sourceId ?? "").trim();
+    if (!normalizedSourceId) {
+      return null;
+    }
+
+    return this.projectListStates.get(normalizedSourceId)?.workspaceRef ?? null;
   }
 
   #resolveProjectSelection(workspaceRef, sourceId) {
@@ -836,6 +892,102 @@ export class AutomationAgent {
     this.#clearBrowseStateForSession(sessionId);
   }
 
+  #buildPageIndicatorButton(page, totalPages, command) {
+    if (totalPages <= 1) {
+      return null;
+    }
+
+    return buildInlineButton(`${page}/${totalPages}`, command);
+  }
+
+  #buildPaginationRow({ currentPage, totalPages, buildCommand }) {
+    if (typeof buildCommand !== "function" || totalPages <= 1) {
+      return [];
+    }
+
+    return [[
+      currentPage > 1 ? buildInlineButton("上一页", buildCommand(currentPage - 1)) : null,
+      this.#buildPageIndicatorButton(currentPage, totalPages, buildCommand(currentPage)),
+      currentPage < totalPages ? buildInlineButton("下一页", buildCommand(currentPage + 1)) : null
+    ]];
+  }
+
+  #buildListCommand({ showAll = false, count = null, page = 1 } = {}) {
+    const parts = ["/list"];
+
+    if (showAll) {
+      parts.push("-a");
+    } else if (Number.isInteger(count) && count > 0) {
+      parts.push("-c", String(count));
+    }
+
+    parts.push("-pg", String(Math.max(1, page)));
+
+    return parts.join(" ");
+  }
+
+  #buildProjectsCommand(page = 1) {
+    return `/projects -pg ${Math.max(1, page)}`;
+  }
+
+  #buildBrowseCommand(mode, page = 1) {
+    const normalizedMode = mode === "find" ? "find" : "ls";
+    return `/${normalizedMode} -pg ${Math.max(1, page)}`;
+  }
+
+  #buildPrimaryNavigationRows({
+    includeProjects = true,
+    includeList = true,
+    includeCurrent = true,
+    includeHelp = false,
+    includeScreen = false,
+    includeMode = false,
+    hasActiveSession = false
+  } = {}) {
+    const rows = [];
+    const primaryRow = [];
+
+    if (includeProjects) {
+      primaryRow.push(buildInlineButton("项目", "/projects"));
+    }
+
+    if (includeList) {
+      primaryRow.push(buildInlineButton("会话", "/list"));
+    }
+
+    if (includeCurrent) {
+      primaryRow.push(buildInlineButton("当前", "/current"));
+    }
+
+    if (primaryRow.length > 0) {
+      rows.push(primaryRow);
+    }
+
+    const secondaryRow = [];
+
+    if (hasActiveSession && includeScreen) {
+      secondaryRow.push(buildInlineButton("输出", "/screen"));
+    }
+
+    if (hasActiveSession && includeMode) {
+      secondaryRow.push(buildInlineButton("模式", "/mode"));
+    }
+
+    if (includeHelp) {
+      secondaryRow.push(buildInlineButton("帮助", "/help"));
+    }
+
+    if (secondaryRow.length > 0) {
+      rows.push(secondaryRow);
+    }
+
+    return rows;
+  }
+
+  #buildPrimaryNavigationReplyMarkup(options = {}) {
+    return buildInlineKeyboard(this.#buildPrimaryNavigationRows(options));
+  }
+
   #buildSessionControlReplyMarkup(session) {
     if (!session?.sessionId) {
       return null;
@@ -853,26 +1005,56 @@ export class AutomationAgent {
       ],
       [
         buildInlineButton(toggleModeLabel, toggleModeCommand),
-        buildInlineButton("当前上下文", "/current")
+        buildInlineButton("模式详情", "/mode")
       ],
-      [buildInlineButton("会话列表", "/list")]
+      ...this.#buildPrimaryNavigationRows({
+        includeProjects: true,
+        includeList: true,
+        includeCurrent: true
+      })
     ]);
   }
 
-  #buildProjectsReplyMarkup(selectionEntries) {
-    const entries = Array.isArray(selectionEntries) ? selectionEntries.slice(0, 8) : [];
-    const rows = entries.map((entry) => [
+  #buildProjectsReplyMarkup(
+    selectionEntries,
+    { hasActiveSession = false, page = 1, pageSize = 8 } = {}
+  ) {
+    const pagination = paginateSelectionEntries(selectionEntries, page, pageSize);
+    const rows = pagination.pageEntries.map((entry) => [
       buildInlineButton(`${entry.index}. ${entry.name}`, `/create ${entry.index}`)
     ]);
 
+    rows.push(
+      ...this.#buildPaginationRow({
+        currentPage: pagination.currentPage,
+        totalPages: pagination.totalPages,
+        buildCommand: (targetPage) => this.#buildProjectsCommand(targetPage)
+      })
+    );
     rows.push([buildInlineButton("刷新项目列表", "/projects")]);
+    rows.push(
+      ...this.#buildPrimaryNavigationRows({
+        includeProjects: false,
+        includeList: true,
+        includeCurrent: true,
+        includeHelp: true,
+        includeScreen: true,
+        includeMode: true,
+        hasActiveSession
+      })
+    );
+
     return buildInlineKeyboard(rows);
   }
 
-  #buildListReplyMarkup(selectionEntries = []) {
+  #buildListReplyMarkup(
+    selectionEntries = [],
+    { hasActiveSession = false, page = 1, pageSize = 6, showAll = false, count = null } = {}
+  ) {
+    const pagination = paginateSelectionEntries(selectionEntries, page, pageSize);
     const rows = [];
 
-    for (const entry of selectionEntries.slice(0, 6)) {
+    for (const entry of pagination.pageEntries) {
       if (entry?.type === "managed") {
         rows.push([
           buildInlineButton(`激活 ${entry.index}`, `/activate ${entry.index}`),
@@ -884,18 +1066,38 @@ export class AutomationAgent {
       rows.push([buildInlineButton(`激活 ${entry.index}`, `/activate ${entry.index}`)]);
     }
 
-    rows.push([
-      buildInlineButton("当前上下文", "/current"),
-      buildInlineButton("项目列表", "/projects")
-    ]);
+    rows.push(
+      ...this.#buildPaginationRow({
+        currentPage: pagination.currentPage,
+        totalPages: pagination.totalPages,
+        buildCommand: (targetPage) =>
+          this.#buildListCommand({
+            showAll,
+            count,
+            page: targetPage
+          })
+      })
+    );
+    rows.push(
+      ...this.#buildPrimaryNavigationRows({
+        includeProjects: true,
+        includeList: false,
+        includeCurrent: true,
+        includeHelp: true,
+        includeScreen: true,
+        includeMode: true,
+        hasActiveSession
+      })
+    );
 
     return buildInlineKeyboard(rows);
   }
 
-  #buildBrowseReplyMarkup(selectionEntries = []) {
+  #buildBrowseReplyMarkup(selectionEntries = [], { page = 1, pageSize = 8, mode = "ls" } = {}) {
+    const pagination = paginateSelectionEntries(selectionEntries, page, pageSize);
     const rows = [];
 
-    for (const entry of selectionEntries.slice(0, 8)) {
+    for (const entry of pagination.pageEntries) {
       rows.push([
         buildInlineButton(
           `${entry.index}. ${entry.name}${entry.type === "directory" ? "/" : ""}`,
@@ -904,6 +1106,13 @@ export class AutomationAgent {
       ]);
     }
 
+    rows.push(
+      ...this.#buildPaginationRow({
+        currentPage: pagination.currentPage,
+        totalPages: pagination.totalPages,
+        buildCommand: (targetPage) => this.#buildBrowseCommand(mode, targetPage)
+      })
+    );
     rows.push([
       buildInlineButton("上一级", "/ls -p .."),
       buildInlineButton("根目录", "/ls -p /")
@@ -926,7 +1135,12 @@ export class AutomationAgent {
       [
         buildInlineButton("查看输出", "/screen"),
         buildInlineButton("当前上下文", "/current")
-      ]
+      ],
+      ...this.#buildPrimaryNavigationRows({
+        includeProjects: true,
+        includeList: true,
+        includeCurrent: false
+      })
     ]);
   }
 
@@ -1051,7 +1265,7 @@ export class AutomationAgent {
       case "find":
         return this.#handleFind(parsedCommand.args, message);
       case "help":
-        return this.#handleHelp();
+        return this.#handleHelp(message);
       case "current":
         return this.#handleCurrent(message);
       case "mode":
@@ -1182,6 +1396,7 @@ export class AutomationAgent {
     const sessions = this.sessionRepository.listSessions();
     const activeSessionId = this.sourceBindingRepository.getBinding(message?.sourceId)?.sessionId ?? null;
     const requestedHistoryCount = parseOptionalNonNegativeIntegerFlag(args, "c", "The -c flag must be a positive integer.");
+    const requestedPage = parseOptionalPositiveIntegerFlag(args, "pg", "The -pg flag must be a positive integer.");
 
     if (requestedHistoryCount === 0) {
       throw new CommandValidationError("The -c flag must be a positive integer.", "command_argument_invalid", { key: "c", value: args?.c });
@@ -1250,6 +1465,7 @@ export class AutomationAgent {
     }
 
     this.#rememberListSelections(message?.sourceId, selectionEntries);
+    const listPagination = paginateSelectionEntries(selectionEntries, requestedPage ?? 1, 6);
     const summary = localCodexHistoryError
       ? `Managed ${managedSessions.length} session(s); local Codex history unavailable.`
       : `Managed ${managedSessions.length} session(s); local Codex history ${unmatchedLocalCodexSessions.length} conversation(s).`;
@@ -1264,7 +1480,14 @@ export class AutomationAgent {
       totalLocalCodexSessions: unmatchedLocalCodexSessions.length,
       omittedLocalCodexSessions,
       selectionEntries,
-      replyMarkup: this.#buildListReplyMarkup(selectionEntries),
+      buttonPage: listPagination.currentPage,
+      buttonTotalPages: listPagination.totalPages,
+      replyMarkup: this.#buildListReplyMarkup(selectionEntries, {
+        hasActiveSession: Boolean(activeSessionId),
+        page: requestedPage ?? 1,
+        showAll: args?.a === true,
+        count: args?.a === true ? null : requestedHistoryCount ?? null
+      }),
       localCodexHistoryError,
       localCodexStateDir: localListing?.stateDir ?? null,
       localCodexSessionIndexPath: localListing?.sessionIndexPath ?? null
@@ -1272,7 +1495,15 @@ export class AutomationAgent {
   }
 
   async #handleProjects(args, message) {
-    const workspaceRef = typeof args.w === "string" && args.w.trim() !== "" ? args.w.trim() : undefined;
+    const requestedPage = parseOptionalPositiveIntegerFlag(args, "pg", "The -pg flag must be a positive integer.");
+    const rememberedWorkspaceRef =
+      requestedPage !== null && args.w === undefined
+        ? this.#getRememberedProjectWorkspaceRef(message?.sourceId)
+        : null;
+    const workspaceRef =
+      typeof args.w === "string" && args.w.trim() !== ""
+        ? args.w.trim()
+        : rememberedWorkspaceRef ?? undefined;
     const result = await this.contextResolver.listProjects({ workspaceRef });
     const renderedSections = [];
     const exampleProject = result.roots.find((root) => root.directories.length > 0)?.directories[0] ?? null;
@@ -1297,13 +1528,26 @@ export class AutomationAgent {
       }
     }
 
-    this.#rememberProjectSelections(message?.sourceId, selectionEntries);
+    const projectPagination = paginateSelectionEntries(selectionEntries, requestedPage ?? 1, 8);
+    this.#rememberProjectSelections(message?.sourceId, selectionEntries, {
+      workspaceRef: result.workspaceRef
+    });
 
     if (exampleProject) {
       renderedSections.push(`Example: /create -n MyTask -w ${exampleProject.projectRoot}`);
       renderedSections.push("Quick create: /c MyTask 1");
     }
+    if (projectPagination.totalPages > 1) {
+      renderedSections.push(
+        `Buttons page: ${projectPagination.currentPage}/${projectPagination.totalPages}. Use the inline buttons to switch pages.`
+      );
+    }
     const summary = `Projects (${result.totalProjectCount}) across ${result.totalRootCount} root(s).`;
+    const activeSessionId =
+      this.sourceBindingRepository.getBinding(message?.sourceId)?.sessionId ?? null;
+    const hasActiveSession = Boolean(
+      activeSessionId && this.sessionRepository.getSession(activeSessionId)
+    );
 
     return {
       actionId: "projects",
@@ -1313,7 +1557,12 @@ export class AutomationAgent {
       configuredProjects: result.configuredProjects,
       roots: result.roots,
       selectionEntries,
-      replyMarkup: this.#buildProjectsReplyMarkup(selectionEntries),
+      buttonPage: projectPagination.currentPage,
+      buttonTotalPages: projectPagination.totalPages,
+      replyMarkup: this.#buildProjectsReplyMarkup(selectionEntries, {
+        hasActiveSession,
+        page: requestedPage ?? 1
+      }),
       totalProjectCount: result.totalProjectCount,
       totalRootCount: result.totalRootCount
     };
@@ -1360,6 +1609,7 @@ export class AutomationAgent {
 
   async #handleLs(args, message) {
     const session = this.#requireManagedSessionOrActiveBinding(args, message, "ls");
+    const requestedPage = parseOptionalPositiveIntegerFlag(args, "pg", "The -pg flag must be a positive integer.");
     const browseState = this.#getBrowseState(message?.sourceId, session.sessionId);
     const resolvedTarget = this.#resolveBrowsePathReference(
       args.p,
@@ -1389,9 +1639,16 @@ export class AutomationAgent {
         ? selectionEntries.map((entry) => formatBrowseEntryLine(entry))
         : ["- (empty)"])
     ];
+    const browsePagination = paginateSelectionEntries(selectionEntries, requestedPage ?? 1, 8);
 
     if (result.omittedEntryCount > 0) {
       renderedLines.push(`- +${result.omittedEntryCount} more item(s) not shown.`);
+    }
+
+    if (browsePagination.totalPages > 1) {
+      renderedLines.push(
+        `- Buttons page: ${browsePagination.currentPage}/${browsePagination.totalPages}. Use the inline buttons to switch pages.`
+      );
     }
 
     renderedLines.push(
@@ -1408,15 +1665,26 @@ export class AutomationAgent {
       entries: selectionEntries,
       totalEntryCount: result.totalEntryCount,
       omittedEntryCount: result.omittedEntryCount,
+      buttonPage: browsePagination.currentPage,
+      buttonTotalPages: browsePagination.totalPages,
       rendered: renderedLines.join("\n"),
-      replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries)
+      replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries, {
+        page: requestedPage ?? 1,
+        mode: "ls"
+      })
     };
   }
 
   async #handleFind(args, message) {
     const session = this.#requireManagedSessionOrActiveBinding(args, message, "find");
-    const query = requireStringFlag(args, "q", "The -q flag is required for /find.");
+    const requestedPage = parseOptionalPositiveIntegerFlag(args, "pg", "The -pg flag must be a positive integer.");
     const browseState = this.#getBrowseState(message?.sourceId, session.sessionId);
+    const query =
+      typeof args.q === "string" && args.q.trim() !== ""
+        ? args.q.trim()
+        : requestedPage !== null && browseState.mode === "find" && browseState.query
+          ? browseState.query
+          : requireStringFlag(args, "q", "The -q flag is required for /find.");
     const resolvedTarget = this.#resolveBrowsePathReference(
       args.p,
       message,
@@ -1449,9 +1717,16 @@ export class AutomationAgent {
         ? selectionEntries.map((entry) => formatBrowseEntryLine(entry, { showRelativePath: true }))
         : ["- (none)"])
     ];
+    const browsePagination = paginateSelectionEntries(selectionEntries, requestedPage ?? 1, 8);
 
     if (result.limited) {
       renderedLines.push("- Result limit reached; refine the keyword or search from a narrower folder.");
+    }
+
+    if (browsePagination.totalPages > 1) {
+      renderedLines.push(
+        `- Buttons page: ${browsePagination.currentPage}/${browsePagination.totalPages}. Use the inline buttons to switch pages.`
+      );
     }
 
     renderedLines.push(
@@ -1469,8 +1744,13 @@ export class AutomationAgent {
       entries: selectionEntries,
       totalMatchCount: result.totalMatchCount,
       limited: result.limited,
+      buttonPage: browsePagination.currentPage,
+      buttonTotalPages: browsePagination.totalPages,
       rendered: renderedLines.join("\n"),
-      replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries)
+      replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries, {
+        page: requestedPage ?? 1,
+        mode: "find"
+      })
     };
   }
 
@@ -1649,11 +1929,27 @@ export class AutomationAgent {
     };
   }
 
-  #handleHelp() {
+  #handleHelp(message) {
+    const sourceId = String(message?.sourceId ?? "").trim();
+    const activeSessionId = sourceId
+      ? this.sourceBindingRepository.getBinding(sourceId)?.sessionId ?? null
+      : null;
+    const hasActiveSession = Boolean(
+      activeSessionId && this.sessionRepository.getSession(activeSessionId)
+    );
+
     return {
       actionId: "help",
       summary: "显示当前系统帮助。",
-      rendered: buildHelpMessage(this.config)
+      rendered: buildHelpMessage(this.config),
+      replyMarkup: this.#buildPrimaryNavigationReplyMarkup({
+        includeProjects: true,
+        includeList: true,
+        includeCurrent: true,
+        includeScreen: true,
+        includeMode: true,
+        hasActiveSession
+      })
     };
   }
 
@@ -1697,7 +1993,14 @@ export class AutomationAgent {
       latestCursor: session ? this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0 : 0,
       executionProfile,
       sandboxMode,
-      replyMarkup: session ? this.#buildSessionControlReplyMarkup(session) : this.#buildProjectsReplyMarkup([])
+      replyMarkup: session
+        ? this.#buildSessionControlReplyMarkup(session)
+        : this.#buildPrimaryNavigationReplyMarkup({
+            includeProjects: true,
+            includeList: true,
+            includeCurrent: false,
+            includeHelp: true
+          })
     };
   }
 
