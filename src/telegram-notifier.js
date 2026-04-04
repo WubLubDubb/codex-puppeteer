@@ -91,6 +91,10 @@ export class TelegramBotNotifier {
 
     const content = this.formatter(notification);
     const attachment = normalizeDocumentAttachment(notification.attachment);
+    const replyMarkup =
+      notification.replyMarkup && typeof notification.replyMarkup === "object"
+        ? structuredClone(notification.replyMarkup)
+        : null;
 
     if (!content && !attachment) {
       throw new AdapterExecutionError(
@@ -128,9 +132,11 @@ export class TelegramBotNotifier {
     const remoteResults = [];
 
     for (const chunk of messageChunks) {
+      const isLastChunk = remoteResults.length === messageChunks.length - 1;
       const remoteResult = await this.client.sendMessage({
         chatId: recipient,
-        text: chunk
+        text: chunk,
+        replyMarkup: isLastChunk ? replyMarkup : null
       });
       remoteResults.push({
         content: chunk,

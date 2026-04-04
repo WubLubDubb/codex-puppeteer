@@ -84,6 +84,7 @@ export function buildDefaultTelegramCommands() {
     { command: "list", description: "查看当前会话与历史对话" },
     { command: "activate", description: "切换当前聊天绑定会话" },
     { command: "current", description: "查看当前会话上下文" },
+    { command: "mode", description: "查看或切换当前权限模式" },
     { command: "send", description: "发送任务到当前或指定会话" },
     { command: "screen", description: "查看当前会话输出" },
     { command: "ls", description: "浏览当前项目目录" },
@@ -326,6 +327,7 @@ export async function startTelegramPollingRuntime({
   const controller = new TelegramUpdateController({
     agent: resolvedAgent,
     notifier: notifierBundle.notifier,
+    client: notifierBundle.client,
     commandDispatchMode: config.telegram.commandDispatchMode,
     logger
   });
@@ -365,7 +367,8 @@ export async function startTelegramPollingRuntime({
           try {
             const updates = await notifierBundle.client.getUpdates({
               offset,
-              timeout: config.telegram.longPollTimeoutSec
+              timeout: config.telegram.longPollTimeoutSec,
+              allowedUpdates: ["message", "callback_query"]
             });
 
             for (const update of updates) {

@@ -162,6 +162,46 @@ function formatBrowseEntryLine(entry, { showRelativePath = false } = {}) {
   return `${entry.index}. [${label}] ${targetPath}`;
 }
 
+function truncateButtonLabel(value, maxLength = 24) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function buildInlineButton(text, callbackData) {
+  const label = truncateButtonLabel(text, 28);
+  const command = String(callbackData ?? "").trim();
+
+  if (!label || !command || command.length > 64) {
+    return null;
+  }
+
+  return {
+    text: label,
+    callback_data: command
+  };
+}
+
+function buildInlineKeyboard(rows) {
+  const inlineKeyboard = Array.isArray(rows)
+    ? rows
+        .map((row) => (Array.isArray(row) ? row.filter(Boolean) : []))
+        .filter((row) => row.length > 0)
+    : [];
+
+  if (inlineKeyboard.length === 0) {
+    return null;
+  }
+
+  return {
+    inline_keyboard: inlineKeyboard
+  };
+}
+
 function truncateInlineText(value, maxLength = 120) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (!text) {
@@ -258,6 +298,7 @@ function buildHelpMessage(config) {
     "- /list [-a] [-c <count>]：查看托管会话和本机 Codex 历史对话",
     "- /activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]：切换当前聊天绑定的活动会话",
     "- /current：查看当前活动会话、项目路径、浏览目录和权限状态",
+    "- /mode [auto|manual] [-n <sessionId|listNumber>]：查看或切换权限模式；省略 -n 时默认当前活动会话",
     "- /send [-n <sessionId|codexConversationId|listNumber>] -m <prompt>：发送任务并自动等待当前轮结果",
     "- 直接发送普通文本：发给当前活动会话",
     "- /screen [-n <sessionId|listNumber>] [-c <cursor>]：查看当前输出或增量输出；已绑定活动会话时可省略 -n",
@@ -274,6 +315,7 @@ function buildHelpMessage(config) {
     "",
     "短别名：",
     "- /h=/help, /p=/projects, /c=/create, /l=/list, /a=/activate",
+    "- /mo=/mode",
     "- /s=/send, /sc=/screen, /r=/read, /cur=/current, /ctx=/current, /k=/kill",
     "- /ep=/enablePermission, /dp=/disablePermission",
     "",
@@ -282,6 +324,7 @@ function buildHelpMessage(config) {
     "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
     "- /create 支持简写：/c MyTask 1",
     "- /send 支持简写：/s 3 继续开发；当前会话已激活时也可直接 /s 继续开发",
+    "- /mode auto 与 /mode manual 默认作用于当前激活会话，也可用 /mode auto 3 指定编号",
     "- /ls 和 /find 的结果都支持编号；可直接用 /ls -p <number> 或 /read -f <number>",
     "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
     "- 如果远程任务被本地审批或 sandbox 限制阻塞，可先执行 /enablePermission，处理完后再 /disablePermission",
@@ -348,6 +391,7 @@ function formatCurrentContextMessage(response) {
     "继续对话：直接发送普通文本，或 /send 继续开发",
     "查看输出：/screen",
     "浏览文件：/ls",
+    "切换模式：/mode auto 或 /mode manual",
     "切换会话：/list 或 /activate"
   );
 
@@ -364,6 +408,18 @@ function formatCommandResponseMessage(response) {
       return [
         response.summary,
         response.session?.projectRoot ? `workspace: ${response.session.projectRoot}` : null
+      ]
+        .filter(Boolean)
+        .join("\n");
+    case "mode":
+    case "enablePermission":
+    case "disablePermission":
+      return [
+        response.summary,
+        response.session?.projectRoot ? `workspace: ${response.session.projectRoot}` : null,
+        response.session?.permissionMode ? `mode: ${response.session.permissionMode}` : null,
+        response.executionProfile ? `profile: ${response.executionProfile}` : null,
+        response.sandboxMode ? `sandbox: ${response.sandboxMode}` : null
       ]
         .filter(Boolean)
         .join("\n");
@@ -780,6 +836,100 @@ export class AutomationAgent {
     this.#clearBrowseStateForSession(sessionId);
   }
 
+  #buildSessionControlReplyMarkup(session) {
+    if (!session?.sessionId) {
+      return null;
+    }
+
+    const toggleModeCommand =
+      session.permissionMode === "auto" ? "/mode manual" : "/mode auto";
+    const toggleModeLabel =
+      session.permissionMode === "auto" ? "切到 manual" : "切到 auto";
+
+    return buildInlineKeyboard([
+      [
+        buildInlineButton("查看输出", "/screen"),
+        buildInlineButton("浏览文件", "/ls")
+      ],
+      [
+        buildInlineButton(toggleModeLabel, toggleModeCommand),
+        buildInlineButton("当前上下文", "/current")
+      ],
+      [buildInlineButton("会话列表", "/list")]
+    ]);
+  }
+
+  #buildProjectsReplyMarkup(selectionEntries) {
+    const entries = Array.isArray(selectionEntries) ? selectionEntries.slice(0, 8) : [];
+    const rows = entries.map((entry) => [
+      buildInlineButton(`${entry.index}. ${entry.name}`, `/create ${entry.index}`)
+    ]);
+
+    rows.push([buildInlineButton("刷新项目列表", "/projects")]);
+    return buildInlineKeyboard(rows);
+  }
+
+  #buildListReplyMarkup(selectionEntries = []) {
+    const rows = [];
+
+    for (const entry of selectionEntries.slice(0, 6)) {
+      if (entry?.type === "managed") {
+        rows.push([
+          buildInlineButton(`激活 ${entry.index}`, `/activate ${entry.index}`),
+          buildInlineButton(`输出 ${entry.index}`, `/screen -n ${entry.index}`)
+        ]);
+        continue;
+      }
+
+      rows.push([buildInlineButton(`激活 ${entry.index}`, `/activate ${entry.index}`)]);
+    }
+
+    rows.push([
+      buildInlineButton("当前上下文", "/current"),
+      buildInlineButton("项目列表", "/projects")
+    ]);
+
+    return buildInlineKeyboard(rows);
+  }
+
+  #buildBrowseReplyMarkup(selectionEntries = []) {
+    const rows = [];
+
+    for (const entry of selectionEntries.slice(0, 8)) {
+      rows.push([
+        buildInlineButton(
+          `${entry.index}. ${entry.name}${entry.type === "directory" ? "/" : ""}`,
+          entry.type === "directory" ? `/ls -p ${entry.index}` : `/read -f ${entry.index}`
+        )
+      ]);
+    }
+
+    rows.push([
+      buildInlineButton("上一级", "/ls -p .."),
+      buildInlineButton("根目录", "/ls -p /")
+    ]);
+    rows.push([buildInlineButton("当前上下文", "/current")]);
+
+    return buildInlineKeyboard(rows);
+  }
+
+  #buildModeReplyMarkup(session) {
+    if (!session?.sessionId) {
+      return null;
+    }
+
+    return buildInlineKeyboard([
+      [
+        buildInlineButton("切到 auto", "/mode auto"),
+        buildInlineButton("切到 manual", "/mode manual")
+      ],
+      [
+        buildInlineButton("查看输出", "/screen"),
+        buildInlineButton("当前上下文", "/current")
+      ]
+    ]);
+  }
+
   async receiveText(message) {
     const taskId = this.repository.nextTaskId();
     this.repository.createTask({ taskId, message });
@@ -876,7 +1026,8 @@ export class AutomationAgent {
         phase: "command.completed",
         sourceId: message.sourceId,
         message: completionMessage,
-        attachment: response?.attachment ?? null
+        attachment: response?.attachment ?? null,
+        replyMarkup: response?.replyMarkup ?? null
       });
 
       return this.repository.getTask(taskId);
@@ -903,6 +1054,8 @@ export class AutomationAgent {
         return this.#handleHelp();
       case "current":
         return this.#handleCurrent(message);
+      case "mode":
+        return this.#handleMode(parsedCommand.args, message);
       case "activate":
         return this.#handleActivate(parsedCommand.args, message);
       case "send":
@@ -935,10 +1088,13 @@ export class AutomationAgent {
   }
 
   async #handleCreate(args, message) {
-    const projectName = requireStringFlag(args, "n", "The -n flag is required for /create.");
     const rawWorkspaceRef = requireStringFlag(args, "w", "The -w flag is required for /create.");
     const projectSelection = this.#resolveProjectSelection(rawWorkspaceRef, message?.sourceId);
     const workspaceRef = projectSelection?.projectRoot ?? rawWorkspaceRef;
+    const projectName =
+      typeof args.n === "string" && args.n.trim() !== ""
+        ? args.n.trim()
+        : projectSelection?.name ?? undefined;
     const launchMode =
       args.mode === "foreground-debug" ? "foreground-debug" : this.config.runtime.defaultLaunchMode;
     const context = this.contextResolver.resolveProject({
@@ -987,7 +1143,8 @@ export class AutomationAgent {
         actionId: "create",
         summary: `Created session ${sessionId} for ${snapshot.projectName}.`,
         session: snapshot,
-        launch
+        launch,
+        replyMarkup: this.#buildSessionControlReplyMarkup(snapshot)
       };
     } catch (error) {
       this.sessionRepository.deleteSession(sessionId);
@@ -1014,7 +1171,10 @@ export class AutomationAgent {
     return {
       actionId: "activate",
       summary: `Activated session ${session.sessionId} for ${session.projectName}. Plain text will now be sent there.`,
-      session: this.sessionRepository.getSession(session.sessionId)
+      session: this.sessionRepository.getSession(session.sessionId),
+      replyMarkup: this.#buildSessionControlReplyMarkup(
+        this.sessionRepository.getSession(session.sessionId)
+      )
     };
   }
 
@@ -1104,6 +1264,7 @@ export class AutomationAgent {
       totalLocalCodexSessions: unmatchedLocalCodexSessions.length,
       omittedLocalCodexSessions,
       selectionEntries,
+      replyMarkup: this.#buildListReplyMarkup(selectionEntries),
       localCodexHistoryError,
       localCodexStateDir: localListing?.stateDir ?? null,
       localCodexSessionIndexPath: localListing?.sessionIndexPath ?? null
@@ -1152,6 +1313,7 @@ export class AutomationAgent {
       configuredProjects: result.configuredProjects,
       roots: result.roots,
       selectionEntries,
+      replyMarkup: this.#buildProjectsReplyMarkup(selectionEntries),
       totalProjectCount: result.totalProjectCount,
       totalRootCount: result.totalRootCount
     };
@@ -1246,7 +1408,8 @@ export class AutomationAgent {
       entries: selectionEntries,
       totalEntryCount: result.totalEntryCount,
       omittedEntryCount: result.omittedEntryCount,
-      rendered: renderedLines.join("\n")
+      rendered: renderedLines.join("\n"),
+      replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries)
     };
   }
 
@@ -1306,7 +1469,8 @@ export class AutomationAgent {
       entries: selectionEntries,
       totalMatchCount: result.totalMatchCount,
       limited: result.limited,
-      rendered: renderedLines.join("\n")
+      rendered: renderedLines.join("\n"),
+      replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries)
     };
   }
 
@@ -1532,7 +1696,8 @@ export class AutomationAgent {
       browseState,
       latestCursor: session ? this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0 : 0,
       executionProfile,
-      sandboxMode
+      sandboxMode,
+      replyMarkup: session ? this.#buildSessionControlReplyMarkup(session) : this.#buildProjectsReplyMarkup([])
     };
   }
 
@@ -1544,6 +1709,50 @@ export class AutomationAgent {
         commandKey: "wait"
       }
     );
+  }
+
+  async #handleMode(args, message) {
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "mode");
+    const requestedMode =
+      typeof args?.m === "string" && args.m.trim() !== ""
+        ? args.m.trim().toLowerCase()
+        : null;
+
+    if (!requestedMode) {
+      const executionProfile =
+        session.permissionMode === "auto"
+          ? this.config.runtime.autoPermissionExecProfile
+          : this.config.runtime.defaultExecProfile;
+      const sandboxMode =
+        executionProfile === "dangerous" ? null : this.config.runtime.codexSandboxMode ?? null;
+
+      return {
+        actionId: "mode",
+        summary: `Session ${session.sessionId} is currently in ${session.permissionMode ?? "manual"} mode.`,
+        session,
+        executionProfile,
+        sandboxMode,
+        replyMarkup: this.#buildModeReplyMarkup(session)
+      };
+    }
+
+    if (!["auto", "manual"].includes(requestedMode)) {
+      throw new CommandValidationError(
+        'The /mode value must be "auto" or "manual".',
+        "command_argument_invalid",
+        { key: "m", value: args?.m }
+      );
+    }
+
+    return requestedMode === "auto"
+      ? this.#handleEnablePermission({ ...args, n: session.sessionId }, message, {
+          actionId: "mode",
+          summary: `Session ${session.sessionId} mode switched to auto.`
+        })
+      : this.#handleDisablePermission({ ...args, n: session.sessionId }, message, {
+          actionId: "mode",
+          summary: `Session ${session.sessionId} mode switched to manual.`
+        });
   }
 
   async #handleWait(args) {
@@ -1703,8 +1912,8 @@ export class AutomationAgent {
     };
   }
 
-  async #handleEnablePermission(args, message) {
-    const session = this.#requireSession(args, message);
+  async #handleEnablePermission(args, message, options = {}) {
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "enablePermission");
     this.sessionRepository.setPermissionMode(session.sessionId, "auto");
     const updatedSession = this.sessionRepository.getSession(session.sessionId);
     const adapterResult =
@@ -1713,16 +1922,20 @@ export class AutomationAgent {
         : null;
 
     return {
-      actionId: "enablePermission",
-      summary: adapterResult?.summary ?? `Session ${session.sessionId} permission mode switched to auto.`,
+      actionId: options.actionId ?? "enablePermission",
+      summary:
+        options.summary ??
+        adapterResult?.summary ??
+        `Session ${session.sessionId} permission mode switched to auto.`,
       session: updatedSession,
       executionProfile: adapterResult?.executionProfile ?? null,
-      sandboxMode: adapterResult?.sandboxMode ?? null
+      sandboxMode: adapterResult?.sandboxMode ?? null,
+      replyMarkup: this.#buildModeReplyMarkup(updatedSession)
     };
   }
 
-  async #handleDisablePermission(args, message) {
-    const session = this.#requireSession(args, message);
+  async #handleDisablePermission(args, message, options = {}) {
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "disablePermission");
     this.sessionRepository.setPermissionMode(session.sessionId, "manual");
     const updatedSession = this.sessionRepository.getSession(session.sessionId);
     const adapterResult =
@@ -1731,12 +1944,15 @@ export class AutomationAgent {
         : null;
 
     return {
-      actionId: "disablePermission",
+      actionId: options.actionId ?? "disablePermission",
       summary:
-        adapterResult?.summary ?? `Session ${session.sessionId} permission mode switched to manual.`,
+        options.summary ??
+        adapterResult?.summary ??
+        `Session ${session.sessionId} permission mode switched to manual.`,
       session: updatedSession,
       executionProfile: adapterResult?.executionProfile ?? null,
-      sandboxMode: adapterResult?.sandboxMode ?? null
+      sandboxMode: adapterResult?.sandboxMode ?? null,
+      replyMarkup: this.#buildModeReplyMarkup(updatedSession)
     };
   }
 
@@ -2040,7 +2256,7 @@ export class AutomationAgent {
   }
 
   #adapterLabelForCommand(commandKey) {
-    if (["help", "current", "projects", "ls", "find", "read", "sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
+    if (["help", "current", "projects", "ls", "find", "read", "sys", "shutdown", "cancel_shutdown", "mode"].includes(commandKey)) {
       return "system";
     }
 

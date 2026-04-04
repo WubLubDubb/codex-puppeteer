@@ -40,6 +40,7 @@ const commandAliases = {
   c: "create",
   l: "list",
   a: "activate",
+  mo: "mode",
   s: "send",
   sc: "screen",
   r: "read",
@@ -75,12 +76,21 @@ export class CommandParser {
 
     if (commandKey === "create" || commandAliases[commandKey] === "create") {
       if (argumentTokens[0] && !argumentTokens[0].startsWith("-")) {
-        args.n = unquote(argumentTokens[0]);
-        index = 1;
+        const first = unquote(argumentTokens[0]);
+        const second = argumentTokens[1];
 
-        if (argumentTokens[1] && !argumentTokens[1].startsWith("-")) {
-          args.w = unquote(argumentTokens[1]);
+        if (/^\d+$/.test(first) && (!second || second.startsWith("-"))) {
+          args.w = first;
+          index = 1;
+        } else {
+          args.n = first;
           index = 2;
+
+          if (second && !second.startsWith("-")) {
+            args.w = unquote(second);
+          } else {
+            index = 1;
+          }
         }
       }
     } else if (commandKey === "activate" || commandAliases[commandKey] === "activate") {
@@ -106,6 +116,30 @@ export class CommandParser {
         } else {
           args.m = argumentTokens.map(unquote).join(" ");
           index = argumentTokens.length;
+        }
+      }
+    } else if (commandKey === "mode" || commandAliases[commandKey] === "mode") {
+      if (argumentTokens[0] && !argumentTokens[0].startsWith("-")) {
+        const first = unquote(argumentTokens[0]).toLowerCase();
+        const second = argumentTokens[1];
+        const isModeValue = first === "auto" || first === "manual";
+
+        if (isModeValue) {
+          args.m = first;
+          index = 1;
+
+          if (second && !second.startsWith("-")) {
+            args.n = unquote(second);
+            index = 2;
+          }
+        } else {
+          args.n = unquote(argumentTokens[0]);
+          index = 1;
+
+          if (second && !second.startsWith("-")) {
+            args.m = unquote(second).toLowerCase();
+            index = 2;
+          }
         }
       }
     }

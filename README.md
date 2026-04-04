@@ -2,19 +2,20 @@
 
 `codex-puppeteer` 是一个通过 Telegram 远程控制本机 `Codex CLI` 的轻量代理。
 
-它适合个人开发场景：你平时仍然在电脑上正常使用 `codex`，但当你离开电脑时，可以通过 Telegram 在手机上继续管理项目、切换会话、续接历史对话、查看输出、浏览目录、下载文档文件。
+它适合个人开发场景：你平时仍然在电脑上正常使用 `codex`，但离开电脑后，可以继续在 Telegram 里创建会话、接着历史对话开发、查看输出、浏览目录、下载文档。
 
 ## 功能概览
 
 - 创建新的 Codex 会话
 - 接管本机已有的 Codex 历史对话
 - 远程发送 prompt，并自动等待当前轮回复
-- 查看会话当前输出或增量输出
+- 查看当前输出或增量输出
 - 浏览项目目录、进入子目录、返回上一级
 - 搜索文件和目录
-- 将文件作为 Telegram 附件直接返回
+- 将文件作为 Telegram 附件返回
 - 持久化保存会话、任务和聊天绑定关系
 - 重启后恢复本地运行状态
+- 支持 Telegram 按钮交互，减少手机端手输命令
 
 ## 系统要求
 
@@ -83,8 +84,8 @@ CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE=dangerous
 
 含义：
 
-- `manual + safe`：默认保留更稳妥的执行策略
-- `auto + dangerous`：执行 `/enablePermission` 后，切到更激进的远程执行模式，适合完全受信任的个人主机
+- `manual + safe`：默认使用更稳妥的执行策略
+- `auto + dangerous`：切到自动权限模式后，使用更激进的远程执行策略，适合完全受信任的个人主机
 
 ## 运行
 
@@ -101,9 +102,10 @@ Allowed project roots: ...
 Sessions file: ...
 Tasks file: ...
 Source bindings file: ...
+Telegram command menu: registered ...
 ```
 
-同时，程序会自动向 Telegram 注册一组常用命令菜单，手机端输入 `/` 时可以直接点选。
+机器人启动时会自动向 Telegram 注册常用命令菜单，手机端输入 `/` 时可以直接点选；部分列表结果还会直接附带按钮。
 
 ## 推荐使用流程
 
@@ -117,7 +119,7 @@ Source bindings file: ...
 /current
 ```
 
-后续继续当前会话时：
+之后继续当前会话时：
 
 ```text
 继续开发登录模块
@@ -144,13 +146,15 @@ Source bindings file: ...
 - `/help`
   查看帮助和当前运行配置摘要。
 - `/projects`
-  列出允许根目录下的项目文件夹，结果带编号。
+  列出允许根目录下的项目文件夹，结果带编号，并附带快速创建按钮。
 - `/create -n <名称> -w <项目路径>`
   创建新的托管会话。
 - `/create <名称> <项目编号>`
   通过 `/projects` 返回的编号快速创建会话。
+- `/create <项目编号>`
+  直接按项目编号创建会话，会默认使用项目文件夹名作为会话名称。
 - `/list`
-  查看当前托管会话和本机可接管的 Codex 历史对话。
+  查看当前托管会话和本机可接管的 Codex 历史对话，并附带激活按钮。
 - `/activate -n <编号|sessionId|codexId> [-w <项目路径>]`
   将某个会话切换为当前聊天的活动会话。
 - `/current`
@@ -176,6 +180,24 @@ Source bindings file: ...
 - `/send` 会自动等待当前轮输出，不需要再显式调用 `/wait`
 - `/send` 开始后会先单独返回一条推荐的 `/screen` 指令，方便你马上追踪长任务
 
+### 模式切换
+
+- `/mode`
+  查看当前活动会话的权限模式、执行档位和 sandbox 信息。
+- `/mode auto`
+  将当前活动会话切换到自动权限模式。
+- `/mode manual`
+  将当前活动会话切回手动模式。
+- `/mode auto 3`
+  将指定编号会话切换到自动模式。
+
+兼容命令仍然保留：
+
+- `/enablePermission`
+- `/disablePermission`
+
+但推荐优先使用 `/mode auto` 和 `/mode manual`。
+
 ### 文件浏览
 
 - `/ls`
@@ -193,12 +215,10 @@ Source bindings file: ...
 - `/read -f <编号>`
   下载最近一次 `/ls` 或 `/find` 结果中的编号文件。
 
-### 权限与系统
+`/ls` 与 `/find` 的结果会附带按钮：目录可直接点进，文件可直接下载。
 
-- `/enablePermission -n <sessionId>`
-  将会话切换到自动权限模式。
-- `/disablePermission -n <sessionId>`
-  恢复默认权限模式。
+### 系统
+
 - `/sys`
   查看宿主机和代理摘要。
 
@@ -209,6 +229,7 @@ Source bindings file: ...
 - `/c` = `/create`
 - `/l` = `/list`
 - `/a` = `/activate`
+- `/mo` = `/mode`
 - `/s` = `/send`
 - `/sc` = `/screen`
 - `/r` = `/read`
@@ -222,7 +243,9 @@ Source bindings file: ...
 
 ```text
 /c DemoTask 1
+/c 1
 /a 3
+/mo auto
 /s 3 继续开发
 /s 继续开发
 ```
@@ -317,6 +340,10 @@ macOS / Linux：
 ### 4. 为什么 `/read` 返回的是附件
 
 这是为了更适合在手机端查看 Markdown、配置文件和文档，避免长文本直接塞满聊天窗口。
+
+### 5. Telegram 按钮是怎么工作的
+
+按钮本质上会回发系统内部支持的命令，例如 `/create 1`、`/activate 3`、`/ls -p 2`、`/mode auto`，所以即使不用按钮，你也可以直接手动输入同样的命令。
 
 ## 安全说明
 

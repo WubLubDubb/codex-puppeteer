@@ -47,6 +47,14 @@ function normalizeCaption(caption, maxLength = 1024) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
+function normalizeReplyMarkup(replyMarkup) {
+  if (!replyMarkup || typeof replyMarkup !== "object" || Array.isArray(replyMarkup)) {
+    return null;
+  }
+
+  return structuredClone(replyMarkup);
+}
+
 function formatPowerShellDiagnostic(value, maxLength = 500) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
 
@@ -370,7 +378,7 @@ export class TelegramBotClient {
     this.powershellRunner = powershellRunner;
   }
 
-  async getUpdates({ offset = 0, timeout = 20, limit = 100, allowedUpdates = ["message"] } = {}) {
+  async getUpdates({ offset = 0, timeout = 20, limit = 100, allowedUpdates = ["message", "callback_query"] } = {}) {
     return this.#callApi("getUpdates", {
       offset,
       timeout,
@@ -379,11 +387,31 @@ export class TelegramBotClient {
     });
   }
 
-  async sendMessage({ chatId, text, disableWebPagePreview = true } = {}) {
+  async sendMessage({ chatId, text, disableWebPagePreview = true, replyMarkup = null } = {}) {
+    const normalizedReplyMarkup = normalizeReplyMarkup(replyMarkup);
+
     return this.#callApi("sendMessage", {
       chat_id: normalizeChatId(chatId),
       text: String(text ?? ""),
-      disable_web_page_preview: disableWebPagePreview
+      disable_web_page_preview: disableWebPagePreview,
+      ...(normalizedReplyMarkup ? { reply_markup: normalizedReplyMarkup } : {})
+    });
+  }
+
+  async answerCallbackQuery({ callbackQueryId, text = "", showAlert = false } = {}) {
+    const normalizedCallbackQueryId = String(callbackQueryId ?? "").trim();
+
+    if (!normalizedCallbackQueryId) {
+      throw new ConfigurationError(
+        "Telegram callback query id is required.",
+        "telegram_callback_query_id_missing"
+      );
+    }
+
+    return this.#callApi("answerCallbackQuery", {
+      callback_query_id: normalizedCallbackQueryId,
+      text: String(text ?? ""),
+      show_alert: showAlert
     });
   }
 
