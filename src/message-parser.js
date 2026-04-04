@@ -24,7 +24,7 @@ const commandAliases = {
   ping: "sys"
 };
 
-export class WeChatCommandParser {
+export class CommandParser {
   parse(commandText) {
     if (typeof commandText !== "string" || commandText.trim() === "") {
       throw new CommandValidationError(

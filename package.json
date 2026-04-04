@@ -7,9 +7,7 @@
   "scripts": {
     "test": "node scripts/test-entry.js",
     "demo": "node src/cli.js",
-    "wecom:server": "node src/wecom-entry.js",
     "tg:bot": "node src/telegram-entry.js",
-    "service": "node src/service-entry.js",
     "repl": "node src/repl.js"
   },
   "dependencies": {

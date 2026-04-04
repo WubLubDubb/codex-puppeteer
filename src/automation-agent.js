@@ -9,7 +9,7 @@ import {
   AuthorizationError,
   serializeError
 } from "./errors.js";
-import { WeChatCommandParser } from "./message-parser.js";
+import { CommandParser } from "./message-parser.js";
 import { InMemoryNotifier } from "./notifier.js";
 import { PolicyEngine } from "./policy-engine.js";
 import { InMemorySessionRepository } from "./session-repository.js";
@@ -231,7 +231,7 @@ function buildHelpMessage(config) {
   const systemMode = String(config?.system?.actionMode ?? "dry-run");
 
   return [
-    "WxCodex Agent /help",
+    "codex-puppeteer /help",
     "",
     "推荐主流程：",
     "1. /projects",
@@ -411,7 +411,7 @@ ${response.assistantText}`;
 export class AutomationAgent {
   constructor({
     config = defaultConfig,
-    parser = new WeChatCommandParser(),
+    parser = new CommandParser(),
     repository = new InMemoryTaskRepository(),
     sessionRepository = new InMemorySessionRepository({
       maxBufferedLines: config.runtime.maxBufferedLines

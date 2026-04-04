@@ -6,7 +6,7 @@ const workspaceRoot = normalizePath(process.cwd());
 
 export const defaultConfig = {
   security: {
-    allowedSources: ["owner.wechat"],
+    allowedSources: ["local.cli"],
     shutdownPassword: "CONFIRM_SHUTDOWN",
     allowedProjectRoots: [workspaceRoot]
   },
@@ -31,10 +31,7 @@ export const defaultConfig = {
     actionMode: "dry-run"
   },
   service: {
-    serviceName: "wxcodex-agent",
-    logDir: `${workspaceRoot}/.agent/logs`,
-    envFiles: [".env", ".env.example"],
-    notifyOnFatal: true
+    envFiles: [".env", ".env.example"]
   },
   projects: {
     demo: {
@@ -43,21 +40,6 @@ export const defaultConfig = {
       rootPath: workspaceRoot,
       defaultFile: "README.md"
     }
-  },
-  wecom: {
-    callbackPath: "/wecom/callback",
-    port: 8787,
-    corpId: "",
-    agentId: "",
-    corpSecret: "",
-    token: "",
-    encodingAESKey: "",
-    receiveId: "",
-    passiveReplyMode: "text",
-    commandDispatchMode: "async",
-    defaultRecipient: "",
-    allowedSources: ["owner.wechat"],
-    maxMessageLength: 1200
   },
   telegram: {
     botToken: "",

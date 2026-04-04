@@ -7,7 +7,7 @@ if (rawArgs.length === 0) {
   process.exit(1);
 }
 
-let sourceId = "owner.wechat";
+let sourceId = "local.cli";
 let commandParts = rawArgs;
 
 if (!rawArgs[0].startsWith("/")) {

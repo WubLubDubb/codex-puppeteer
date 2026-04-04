@@ -45,7 +45,7 @@ async function handleLine(line) {
   }
 
   const result = await agent.receiveText({
-    sourceId: "owner.wechat",
+    sourceId: "local.cli",
     messageId: `repl-${Date.now()}`,
     content
   });
@@ -53,10 +53,10 @@ async function handleLine(line) {
   printResponse(result);
 }
 
-console.log("WxCodex local REPL");
+console.log("codex-puppeteer local REPL");
 console.log("Examples: /create -n DemoProject -w demo, /send -n session-0001 -m \"help\" ");
 console.log("Type exit to quit.");
-rl.setPrompt("wxcodex> ");
+rl.setPrompt("codex> ");
 rl.prompt();
 
 rl.on("line", (line) => {
