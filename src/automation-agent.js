@@ -219,8 +219,6 @@ function buildHelpMessage(config) {
     : process.platform === "win32"
       ? "F:\\project"
       : "~/project";
-  const separator = firstRoot.includes("\\") ? "\\" : "/";
-  const exampleWorkspace = `${firstRoot.replace(/[\\/]+$/, "")}${separator}YourProject`;
   const screenLines = Number(config?.runtime?.defaultScreenLines ?? 20);
   const sendWaitMinutes = formatWaitMinutes(config?.runtime?.defaultSendWaitTimeoutMs ?? 0);
   const explicitWaitMinutes = formatWaitMinutes(config?.runtime?.defaultWaitTimeoutMs ?? 0);
@@ -235,9 +233,10 @@ function buildHelpMessage(config) {
     "",
     "推荐主流程：",
     "1. /projects",
-    `2. /create -n MyTask -w ${exampleWorkspace}`,
-    '3. /send -n session-0001 -m "请先扫描项目并总结目录结构"',
-    "4. 后续可直接发送普通文本续聊；切换会话时先用 /activate",
+    "2. /create MyTask 1",
+    "3. /send 请先扫描项目并总结目录结构",
+    "4. /current",
+    "5. 后续可直接发送普通文本续聊；切换会话时先用 /activate",
     "",
     "当前运行配置：",
     ...(allowedRoots.length > 0
@@ -254,18 +253,18 @@ function buildHelpMessage(config) {
     "",
     "命令列表：",
     "- /help：查看当前帮助",
-    "- /projects [-w <allowedRoot>]：列出允许根目录下的项目文件夹",
-    "- /create -n <name> -w <workspace>：创建新会话",
+    "- /projects [-w <allowedRoot>]：列出允许根目录下的项目文件夹，结果带编号",
+    "- /create -n <name> -w <workspace|projectNumber>：创建新会话",
     "- /list [-a] [-c <count>]：查看托管会话和本机 Codex 历史对话",
     "- /activate -n <sessionId|codexConversationId|listNumber> [-w <workspace>]：切换当前聊天绑定的活动会话",
-    "- /send -n <sessionId|codexConversationId|listNumber> -m <prompt>：发送任务并自动等待当前轮结果",
+    "- /current：查看当前活动会话、项目路径、浏览目录和权限状态",
+    "- /send [-n <sessionId|codexConversationId|listNumber>] -m <prompt>：发送任务并自动等待当前轮结果",
     "- 直接发送普通文本：发给当前活动会话",
-    "- /screen -n <sessionId|listNumber> [-c <cursor>]：查看当前输出或增量输出",
-    "- /ls [-n <sessionId|listNumber>] [-p <path|number|..|/>]????????????????",
-    "- /find [-n <sessionId|listNumber>] -q <keyword> [-p <path|number|..|/>]???????????",
-    "- /read [-n <sessionId|listNumber>] -f <path|number>?????????????????",
-
-    "- /enablePermission -n <sessionId|listNumber>: switch the session to auto mode for approval/sandbox-blocked tasks; the actual auto profile is shown above",
+    "- /screen [-n <sessionId|listNumber>] [-c <cursor>]：查看当前输出或增量输出；已绑定活动会话时可省略 -n",
+    "- /ls [-n <sessionId|listNumber>] [-p <path|number|..|/>]：浏览当前目录或进入指定子目录",
+    "- /find [-n <sessionId|listNumber>] -q <keyword> [-p <path|number|..|/>]：搜索文件或目录",
+    "- /read [-n <sessionId|listNumber>] -f <path|number>：按路径或编号下载文件",
+    "- /enablePermission -n <sessionId|listNumber>：把会话切到 auto 模式，适合处理审批或 sandbox 阻塞",
     "- /disablePermission -n <sessionId|listNumber>：把会话切回 manual 执行档，恢复默认执行策略",
     "- /kill -n <sessionId|listNumber>：终止指定会话",
     "- /sys：查看宿主机状态",
@@ -273,16 +272,86 @@ function buildHelpMessage(config) {
     "- /shutdown -p <password>：立即关机",
     "- /cancel_shutdown：取消自动关机计划",
     "",
+    "短别名：",
+    "- /h=/help, /p=/projects, /c=/create, /l=/list, /a=/activate",
+    "- /s=/send, /sc=/screen, /r=/read, /cur=/current, /ctx=/current, /k=/kill",
+    "- /ep=/enablePermission, /dp=/disablePermission",
+    "",
     "补充说明：",
     "- /wait 已废弃，不需要再单独调用",
     "- /send 开始后会先回一条 screen 提示，你可以用 /screen 持续追踪长任务",
-    "- /ls / /find ????????? /ls -p <number> ? /read -f <number> ????",
+    "- /create 支持简写：/c MyTask 1",
+    "- /send 支持简写：/s 3 继续开发；当前会话已激活时也可直接 /s 继续开发",
+    "- /ls 和 /find 的结果都支持编号；可直接用 /ls -p <number> 或 /read -f <number>",
     "- 如果 /activate 的目标是历史对话且当前没有项目上下文，请补 -w <workspace>",
-    "- If a remote task is blocked by local approvals or sandbox restrictions, run /enablePermission first; use /disablePermission to return to the default policy",
+    "- 如果远程任务被本地审批或 sandbox 限制阻塞，可先执行 /enablePermission，处理完后再 /disablePermission",
     systemMode === "dry-run"
       ? "- 当前 /shutdown 仍是 dry-run，仅模拟执行，不会真正关机"
       : "- 当前 /shutdown 为 real 模式，使用前请确认风险"
   ].join("\n");
+}
+
+function formatCurrentContextMessage(response) {
+  const sourceId = String(response?.sourceId ?? "").trim() || "(unknown)";
+  const session = response?.session ?? null;
+
+  if (!session) {
+    return [
+      "当前上下文：",
+      `来源：${sourceId}`,
+      `会话：${response?.staleBindingCleared ? "已清理失效绑定" : "未绑定"}`,
+      "提示：请先使用 /projects、/create、/list 或 /activate。",
+      "",
+      "下一步：",
+      "查看项目：/projects",
+      "创建会话：/create MyTask 1",
+      "切换会话：/list 或 /activate 3"
+    ].join("\n");
+  }
+
+  const browseState = response?.browseState ?? {
+    currentRelativePath: "",
+    selectionEntries: [],
+    mode: "ls",
+    query: null
+  };
+  const sections = [
+    "当前上下文：",
+    `来源：${sourceId}`,
+    `会话：${session.sessionId}`,
+    `项目：${session.projectName}`,
+    `工作区：${formatDisplayPath(session.projectRoot)}`,
+    `状态：${session.status}`,
+    `权限：${session.permissionMode ?? "manual"} -> ${response?.executionProfile ?? "safe"}`,
+    `驱动：${session.driver ?? "(unknown)"}`,
+    `浏览目录：${formatBrowseRelativePath(browseState.currentRelativePath ?? "")}`,
+    `浏览模式：${browseState.mode === "find" ? "find" : "ls"}`,
+    `最近条目数：${Array.isArray(browseState.selectionEntries) ? browseState.selectionEntries.length : 0}`,
+    `最新游标：${response?.latestCursor ?? 0}`
+  ];
+
+  if (browseState.mode === "find" && browseState.query) {
+    sections.push(`搜索关键词：${browseState.query}`);
+  }
+
+  if (session.codexThreadId) {
+    sections.push(`Codex 会话：${shortenIdentifier(session.codexThreadId)}`);
+  }
+
+  if (response?.sandboxMode) {
+    sections.push(`Sandbox：${response.sandboxMode}`);
+  }
+
+  sections.push(
+    "",
+    "下一步：",
+    "继续对话：直接发送普通文本，或 /send 继续开发",
+    "查看输出：/screen",
+    "浏览文件：/ls",
+    "切换会话：/list 或 /activate"
+  );
+
+  return sections.join("\n");
 }
 function formatCommandResponseMessage(response) {
   if (!response || typeof response !== "object") {
@@ -365,6 +434,8 @@ function formatCommandResponseMessage(response) {
       return response.rendered ? truncateText(response.rendered, 6000) : response.summary;
     case "help":
       return response.rendered ? truncateText(response.rendered, 6000) : response.summary;
+    case "current":
+      return formatCurrentContextMessage(response);
     case "send": {
       const sessionLabel = response.session?.sessionId ?? response.sessionId ?? "unknown";
       const hasSettledAssistantReply =
@@ -437,6 +508,7 @@ export class AutomationAgent {
     this.contextResolver = contextResolver;
     this.policyEngine = policyEngine;
     this.listSelections = new Map();
+    this.projectSelections = new Map();
     this.fileBrowseStates = new Map();
   }
 
@@ -512,6 +584,60 @@ export class AutomationAgent {
       : [];
 
     this.listSelections.set(normalizedSourceId, normalizedEntries);
+  }
+
+  #rememberProjectSelections(sourceId, selectionEntries) {
+    if (typeof sourceId !== "string" || sourceId.trim() === "") {
+      return;
+    }
+
+    const normalizedSourceId = sourceId.trim();
+    const normalizedEntries = Array.isArray(selectionEntries)
+      ? selectionEntries
+          .map((entry) => ({
+            index: Number(entry?.index ?? 0),
+            projectRoot: entry?.projectRoot ? String(entry.projectRoot) : "",
+            name: entry?.name ? String(entry.name) : ""
+          }))
+          .filter(
+            (entry) =>
+              Number.isInteger(entry.index) &&
+              entry.index > 0 &&
+              typeof entry.projectRoot === "string" &&
+              entry.projectRoot !== ""
+          )
+      : [];
+
+    this.projectSelections.set(normalizedSourceId, normalizedEntries);
+  }
+
+  #resolveProjectSelection(workspaceRef, sourceId) {
+    const normalizedWorkspaceRef = String(workspaceRef ?? "").trim();
+    if (!/^\d+$/.test(normalizedWorkspaceRef)) {
+      return null;
+    }
+
+    const normalizedSourceId = String(sourceId ?? "").trim();
+    const selectionEntries = normalizedSourceId ? this.projectSelections.get(normalizedSourceId) ?? [] : [];
+
+    if (selectionEntries.length === 0) {
+      throw new ContextResolutionError(
+        `Numeric project selection "${normalizedWorkspaceRef}" is unavailable because there is no recent /projects result for this chat. Run /projects first.`,
+        "project_selection_missing",
+        { selection: normalizedWorkspaceRef }
+      );
+    }
+
+    const entry = selectionEntries.find((candidate) => candidate.index === Number(normalizedWorkspaceRef));
+    if (!entry) {
+      throw new ContextResolutionError(
+        `Numeric project selection "${normalizedWorkspaceRef}" is not present in the latest /projects result for this chat. Run /projects again.`,
+        "project_selection_missing",
+        { selection: normalizedWorkspaceRef }
+      );
+    }
+
+    return structuredClone(entry);
   }
 
   #resolveNumberedSelection(targetRef, sourceId) {
@@ -768,13 +894,15 @@ export class AutomationAgent {
       case "list":
         return this.#handleList(parsedCommand.args, message);
       case "projects":
-        return this.#handleProjects(parsedCommand.args);
+        return this.#handleProjects(parsedCommand.args, message);
       case "ls":
         return this.#handleLs(parsedCommand.args, message);
       case "find":
         return this.#handleFind(parsedCommand.args, message);
       case "help":
         return this.#handleHelp();
+      case "current":
+        return this.#handleCurrent(message);
       case "activate":
         return this.#handleActivate(parsedCommand.args, message);
       case "send":
@@ -808,7 +936,9 @@ export class AutomationAgent {
 
   async #handleCreate(args, message) {
     const projectName = requireStringFlag(args, "n", "The -n flag is required for /create.");
-    const workspaceRef = requireStringFlag(args, "w", "The -w flag is required for /create.");
+    const rawWorkspaceRef = requireStringFlag(args, "w", "The -w flag is required for /create.");
+    const projectSelection = this.#resolveProjectSelection(rawWorkspaceRef, message?.sourceId);
+    const workspaceRef = projectSelection?.projectRoot ?? rawWorkspaceRef;
     const launchMode =
       args.mode === "foreground-debug" ? "foreground-debug" : this.config.runtime.defaultLaunchMode;
     const context = this.contextResolver.resolveProject({
@@ -980,11 +1110,13 @@ export class AutomationAgent {
     };
   }
 
-  async #handleProjects(args) {
+  async #handleProjects(args, message) {
     const workspaceRef = typeof args.w === "string" && args.w.trim() !== "" ? args.w.trim() : undefined;
     const result = await this.contextResolver.listProjects({ workspaceRef });
     const renderedSections = [];
     const exampleProject = result.roots.find((root) => root.directories.length > 0)?.directories[0] ?? null;
+    const selectionEntries = [];
+    let selectionIndex = 1;
 
     for (const root of result.roots) {
       renderedSections.push(`Projects under ${root.rootPath} (${root.directories.length}):`);
@@ -993,11 +1125,22 @@ export class AutomationAgent {
         continue;
       }
 
-      renderedSections.push(...root.directories.map((project) => formatDiscoveredProjectLine(project)));
+      for (const project of root.directories) {
+        selectionEntries.push({
+          index: selectionIndex,
+          projectRoot: project.projectRoot,
+          name: project.name
+        });
+        renderedSections.push(`${selectionIndex}. ${project.name}`);
+        selectionIndex += 1;
+      }
     }
+
+    this.#rememberProjectSelections(message?.sourceId, selectionEntries);
 
     if (exampleProject) {
       renderedSections.push(`Example: /create -n MyTask -w ${exampleProject.projectRoot}`);
+      renderedSections.push("Quick create: /c MyTask 1");
     }
     const summary = `Projects (${result.totalProjectCount}) across ${result.totalRootCount} root(s).`;
 
@@ -1008,6 +1151,7 @@ export class AutomationAgent {
       workspaceRef: result.workspaceRef,
       configuredProjects: result.configuredProjects,
       roots: result.roots,
+      selectionEntries,
       totalProjectCount: result.totalProjectCount,
       totalRootCount: result.totalRootCount
     };
@@ -1305,7 +1449,7 @@ export class AutomationAgent {
   }
 
   async #handleScreen(args, message) {
-    const session = this.#requireSession(args, message);
+    const session = this.#requireManagedSessionOrActiveBinding(args, message, "screen");
     const requestedLimit = args.l ? Number(args.l) : this.config.runtime.defaultScreenLines;
     const afterCursor = parseOptionalNonNegativeIntegerFlag(
       args,
@@ -1346,6 +1490,49 @@ export class AutomationAgent {
       actionId: "help",
       summary: "显示当前系统帮助。",
       rendered: buildHelpMessage(this.config)
+    };
+  }
+
+  #handleCurrent(message) {
+    const sourceId = String(message?.sourceId ?? "").trim();
+    const binding = sourceId ? this.sourceBindingRepository.getBinding(sourceId) : null;
+    let staleBindingCleared = false;
+    let session = binding?.sessionId ? this.sessionRepository.getSession(binding.sessionId) : null;
+
+    if (binding?.sessionId && !session && sourceId) {
+      this.sourceBindingRepository.clearBinding(sourceId);
+      staleBindingCleared = true;
+    }
+
+    const browseState = session
+      ? this.#getBrowseState(sourceId, session.sessionId)
+      : {
+          currentRelativePath: "",
+          selectionEntries: [],
+          mode: "ls",
+          query: null
+        };
+    const executionProfile =
+      session?.permissionMode === "auto"
+        ? this.config.runtime.autoPermissionExecProfile
+        : this.config.runtime.defaultExecProfile;
+    const sandboxMode =
+      executionProfile === "dangerous" ? null : this.config.runtime.codexSandboxMode ?? null;
+
+    return {
+      actionId: "current",
+      summary: session
+        ? `Current active session is ${session.sessionId} (${session.projectName}).`
+        : staleBindingCleared
+          ? "The previous active session is no longer available and its stale binding was cleared."
+          : "No active session is currently bound for this chat.",
+      sourceId,
+      session,
+      staleBindingCleared,
+      browseState,
+      latestCursor: session ? this.sessionRepository.getLatestOutputSequence(session.sessionId) ?? 0 : 0,
+      executionProfile,
+      sandboxMode
     };
   }
 
@@ -1620,11 +1807,15 @@ export class AutomationAgent {
   }
 
   async #resolveSendSession(args, message) {
-    const targetRef = requireStringFlag(
-      args,
-      "n",
-      "The -n flag is required and must reference a managed session id or local Codex conversation id."
-    );
+    const targetRef =
+      typeof args?.n === "string" && args.n.trim() !== ""
+        ? args.n.trim()
+        : null;
+
+    if (!targetRef) {
+      return this.#requireManagedSessionOrActiveBinding(args, message, "send");
+    }
+
     const numberedSelection = this.#resolveNumberedSelection(targetRef, message?.sourceId);
     const resolvedTargetRef = numberedSelection
       ? numberedSelection.type === "managed"
@@ -1849,7 +2040,7 @@ export class AutomationAgent {
   }
 
   #adapterLabelForCommand(commandKey) {
-    if (["help", "projects", "ls", "find", "read", "sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
+    if (["help", "current", "projects", "ls", "find", "read", "sys", "shutdown", "cancel_shutdown"].includes(commandKey)) {
       return "system";
     }
 

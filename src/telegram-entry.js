@@ -76,6 +76,26 @@ function resolveSandboxMode(value, fallback = null) {
     : fallback;
 }
 
+export function buildDefaultTelegramCommands() {
+  return [
+    { command: "help", description: "查看帮助与当前配置" },
+    { command: "projects", description: "查看可用项目列表" },
+    { command: "create", description: "创建新的 Codex 会话" },
+    { command: "list", description: "查看当前会话与历史对话" },
+    { command: "activate", description: "切换当前聊天绑定会话" },
+    { command: "current", description: "查看当前会话上下文" },
+    { command: "send", description: "发送任务到当前或指定会话" },
+    { command: "screen", description: "查看当前会话输出" },
+    { command: "ls", description: "浏览当前项目目录" },
+    { command: "find", description: "搜索文件或目录" },
+    { command: "read", description: "下载指定文件" },
+    { command: "ep", description: "开启自动权限模式" },
+    { command: "dp", description: "恢复手动权限模式" },
+    { command: "kill", description: "终止指定会话" },
+    { command: "sys", description: "查看宿主机状态" }
+  ];
+}
+
 export function createTelegramRuntimeConfigFromEnv({
   env = process.env,
   cwd = process.cwd(),
@@ -309,6 +329,32 @@ export async function startTelegramPollingRuntime({
     commandDispatchMode: config.telegram.commandDispatchMode,
     logger
   });
+  const registeredCommands = buildDefaultTelegramCommands();
+  let commandMenu = {
+    configured: false,
+    commands: registeredCommands,
+    error: null
+  };
+
+  if (typeof notifierBundle.client?.setMyCommands === "function") {
+    try {
+      await notifierBundle.client.setMyCommands({
+        commands: registeredCommands
+      });
+      commandMenu = {
+        configured: true,
+        commands: registeredCommands,
+        error: null
+      };
+    } catch (error) {
+      commandMenu = {
+        configured: false,
+        commands: registeredCommands,
+        error: serializeError(error)
+      };
+      logger?.warn?.("Telegram command menu registration failed", commandMenu.error);
+    }
+  }
 
   let running = true;
   let offset = 0;
@@ -354,6 +400,7 @@ export async function startTelegramPollingRuntime({
     recovery,
     client: notifierBundle.client,
     controller,
+    commandMenu,
     capabilities: {
       activeNotificationEnabled: notifierBundle.activeNotificationEnabled
     },
@@ -372,4 +419,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`Sessions file: ${runtime.config.runtime.sessionsFilePath}`);
   console.log(`Tasks file: ${runtime.config.runtime.tasksFilePath}`);
   console.log(`Source bindings file: ${runtime.config.runtime.sourceBindingsFilePath}`);
+  if (runtime.commandMenu?.configured) {
+    console.log(`Telegram command menu: registered ${runtime.commandMenu.commands.length} command(s).`);
+  }
 }

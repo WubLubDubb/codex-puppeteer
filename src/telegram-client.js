@@ -387,6 +387,23 @@ export class TelegramBotClient {
     });
   }
 
+  async setMyCommands({ commands = [], scope = null, languageCode = null } = {}) {
+    const normalizedCommands = Array.isArray(commands)
+      ? commands
+          .map((entry) => ({
+            command: String(entry?.command ?? "").trim(),
+            description: String(entry?.description ?? "").trim()
+          }))
+          .filter((entry) => entry.command !== "" && entry.description !== "")
+      : [];
+
+    return this.#callApi("setMyCommands", {
+      commands: normalizedCommands,
+      ...(scope ? { scope } : {}),
+      ...(languageCode ? { language_code: languageCode } : {})
+    });
+  }
+
   async sendDocument({ chatId, filePath, fileName = null, caption = "" } = {}) {
     const normalizedPath = String(filePath ?? "").trim();
     if (!normalizedPath) {

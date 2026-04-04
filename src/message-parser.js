@@ -20,8 +20,34 @@ function normalizeCommandKey(token) {
   return token.replace(/^\/+/, "").toLowerCase();
 }
 
+function looksLikeSessionReference(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return false;
+  }
+
+  return (
+    /^\d+$/.test(text) ||
+    /^session-\d+$/i.test(text) ||
+    /^[0-9a-f]{8,}-[0-9a-f-]{8,}$/i.test(text)
+  );
+}
+
 const commandAliases = {
-  ping: "sys"
+  ping: "sys",
+  h: "help",
+  p: "projects",
+  c: "create",
+  l: "list",
+  a: "activate",
+  s: "send",
+  sc: "screen",
+  r: "read",
+  cur: "current",
+  ctx: "current",
+  k: "kill",
+  ep: "enablepermission",
+  dp: "disablepermission"
 };
 
 export class CommandParser {
@@ -46,6 +72,43 @@ export class CommandParser {
 
     const args = {};
     let index = 0;
+
+    if (commandKey === "create" || commandAliases[commandKey] === "create") {
+      if (argumentTokens[0] && !argumentTokens[0].startsWith("-")) {
+        args.n = unquote(argumentTokens[0]);
+        index = 1;
+
+        if (argumentTokens[1] && !argumentTokens[1].startsWith("-")) {
+          args.w = unquote(argumentTokens[1]);
+          index = 2;
+        }
+      }
+    } else if (commandKey === "activate" || commandAliases[commandKey] === "activate") {
+      if (argumentTokens[0] && !argumentTokens[0].startsWith("-")) {
+        args.n = unquote(argumentTokens[0]);
+        index = 1;
+
+        if (argumentTokens[1] && !argumentTokens[1].startsWith("-")) {
+          args.w = unquote(argumentTokens[1]);
+          index = 2;
+        }
+      }
+    } else if (commandKey === "send" || commandAliases[commandKey] === "send") {
+      if (argumentTokens[0] && !argumentTokens[0].startsWith("-")) {
+        const first = unquote(argumentTokens[0]);
+        const remaining = argumentTokens.slice(1);
+        const nextIsValue = remaining[0] && !remaining[0].startsWith("-");
+
+        if (nextIsValue && looksLikeSessionReference(first)) {
+          args.n = first;
+          args.m = remaining.map(unquote).join(" ");
+          index = argumentTokens.length;
+        } else {
+          args.m = argumentTokens.map(unquote).join(" ");
+          index = argumentTokens.length;
+        }
+      }
+    }
 
     while (index < argumentTokens.length) {
       const token = argumentTokens[index];
@@ -85,3 +148,5 @@ export class CommandParser {
     };
   }
 }
+
+export class WeChatCommandParser extends CommandParser {}
