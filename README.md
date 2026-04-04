@@ -1,214 +1,78 @@
 # codex-puppeteer
 
-`codex-puppeteer` 是一个面向个人使用的远程控制代理，用来把本机的 `Codex CLI` 会话接到聊天端远程操作。
+`codex-puppeteer` 是一个面向开源用户的远程开发代理，用来把本机的 `Codex CLI` 会话接入聊天端，实现远程发起任务、接续会话、查看输出、浏览项目文件和下载文档。
 
-当前主线是 Telegram Bot 控制。你可以在手机上完成项目选择、会话创建、历史对话接续、消息发送、输出查看、目录浏览和文件下载，而不需要远程桌面回到电脑前。
+当前仓库提供两类接入方式：
 
-## 项目定位
+- Telegram Bot
+- 企业微信回调服务
 
-这个项目解决的不是 VS Code GUI 自动化，也不是模拟点击编辑器里的发送按钮。
+如果你是个人使用，推荐优先部署 Telegram 版本。
 
-它现在走的是更稳定的方式：
+## 功能概览
 
-1. 在指定项目目录下启动或接管 `Codex CLI`
-2. 通过本地进程管理与 Codex 交互
-3. 通过 Telegram Bot 接收远程指令
-4. 把输出、目录信息和文件附件回传到聊天端
-
-对应到你平时的真实开发流程，就是：
-
-1. 打开命令行
-2. 进入项目目录
-3. 输入 `codex`
-4. 给 Codex 发任务
-5. 等结果并继续对话
-
-## 当前能力
-
-- 远程创建新的 Codex 会话
+- 在指定项目目录创建新的 Codex 会话
 - 接管本机已有的 Codex 历史对话并继续开发
-- 在多个项目之间切换当前活动会话
-- 发送 prompt，并自动等待当前轮输出后回传
-- 查看当前会话最近输出
+- 远程发送 prompt，并自动等待当前轮输出
+- 查看会话最近输出和任务进度
 - 浏览项目目录，进入子目录或返回上级目录
-- 搜索文件和目录
-- 直接把文件作为 Telegram 附件返回
-- 持久化保存会话、任务和来源绑定，便于重启后恢复
-- 同时保留 Telegram 和 WeCom 接入层，其中 Telegram 是当前主推荐路径
+- 搜索文件或目录
+- 直接把文件作为聊天附件返回
+- 持久化保存会话、任务和聊天来源绑定
+- 进程重启后恢复运行状态
 
 ## 适用场景
 
-- 你平时就是在本机命令行里运行 `codex`
-- 你有多个项目，希望在手机上随时切换继续开发
-- 你主要看结果和文档，不想频繁远程桌面登录
-- 你想把“选项目 -> 选会话 -> 发任务 -> 看结果 -> 读文件”做成一条轻量流程
+- 你在本机通过 `codex` 进行日常开发
+- 你希望在手机上远程操作多个项目
+- 你需要查看项目文档、README、部署说明或配置文件
+- 你希望把“选项目 -> 发任务 -> 看结果 -> 读文件”做成一条轻量工作流
 
-## 快速开始
+## 系统要求
 
-### 1. 环境要求
-
-- Node.js 18+
+- Node.js 18 或更高版本
 - 本机已安装并可直接执行 `codex`
-- 一台长期运行本代理的电脑
-- 一个 Telegram Bot Token
+- Windows、macOS 或 Linux
+- 一个可用的 Telegram Bot Token，或一套企业微信回调配置
 
-### 2. 安装依赖
+## 安装
 
 ```bash
 npm install
 ```
 
-### 3. 配置
+安装完成后，建议先在终端确认本机可以直接运行：
 
-仓库公开保留了 `.env.example` 作为模板。
+```bash
+codex --version
+```
 
-运行时会优先读取 `.env`，如果 `.env` 不存在，就自动回退到 `.env.example`。所以首次使用时，你可以直接填写 `.env.example`。
+如果命令不可用，需要先完成 Codex CLI 的本地安装与登录。
 
-至少需要配置这些参数：
+## 配置
 
-- `TG_BOT_TOKEN`
-- `TG_ALLOWED_CHAT_IDS`
-- `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
+仓库提供了 [`.env.example`](/f:/Project/codex-puppeteer/.env.example) 作为配置模板。
 
-示例：
+运行时会优先读取 `.env`；如果 `.env` 不存在，则回退到 `.env.example`。  
+开发调试可以直接编辑 `.env.example`，正式部署建议复制为 `.env` 再填写。
+
+### Telegram 最小配置
+
+至少需要配置以下变量：
 
 ```env
-TG_BOT_TOKEN=123456:xxxxx
-TG_ALLOWED_CHAT_IDS=8084968294
+TG_BOT_TOKEN=你的机器人Token
+TG_ALLOWED_CHAT_IDS=你的Telegram数字chat_id
 CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS=F:\project
 ```
 
-如果有多个项目根目录，可以使用逗号分隔：
+如果需要允许多个项目根目录，可以用逗号分隔：
 
 ```env
 CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS=F:\project,D:\workspace
 ```
 
-### 4. 启动 Telegram Bot
-
-```bash
-npm run tg:bot
-```
-
-看到类似输出，就说明轮询已经启动：
-
-```text
-Telegram polling bot started.
-Allowed chat ids: ...
-Allowed project roots: ...
-```
-
-## 推荐使用流程
-
-1. 在 Telegram 中发送 `/help`
-2. 发送 `/projects`
-3. 发送 `/create -n MyTask -w F:\project\MCP`
-4. 发送 `/send -n session-0001 -m 请先扫描项目并总结目录结构`
-5. 等待自动回复
-6. 需要补看进度时发送 `/screen`
-7. 需要读文档时用 `/ls`、`/find`、`/read`
-8. 需要继续当前会话时，直接发送普通文本
-9. 需要切换项目或历史会话时，先 `/list`，再 `/activate`
-
-## 指令说明
-
-### 会话相关
-
-- `/help`
-  显示当前可用命令和简要用法。
-
-- `/projects`
-  列出允许根目录下的首层项目目录，方便复制路径。
-
-- `/create -n <名称> -w <项目路径>`
-  在指定项目目录创建一个新的托管会话。
-
-- `/list`
-  同时列出当前托管会话和本机可接管的 Codex 历史对话。
-
-- `/activate -n <编号或sessionId或codexId> [-w <项目路径>]`
-  把某个会话切成当前活动会话。之后直接发普通文本，就会继续发到这个会话里。
-
-- `/kill -n <sessionId>`
-  终止一个托管会话。
-
-### 对话相关
-
-- `/send -n <目标> -m <内容>`
-  向指定会话或历史对话发送消息，并自动等待当前轮输出后回传。
-
-- 直接发送普通文本
-  如果当前已经有活动会话，就不需要每次都写 `/send`。
-
-- `/screen`
-  查看当前活动会话最近输出，适合补看长任务进度。
-
-### 浏览与读文件
-
-- `/ls`
-  列出当前浏览目录内容。
-
-- `/ls -p <编号>`
-  进入某个子目录。
-
-- `/ls -p ..`
-  返回上一级目录。
-
-- `/find -q <关键词>`
-  在当前工作区搜索文件或目录。
-
-- `/read -f <相对路径>`
-  读取指定文件，并以 Telegram 附件方式返回。
-
-- `/read -f <编号>`
-  直接读取最近一次 `/ls` 或 `/find` 结果中的编号文件。
-
-### 权限模式
-
-- `/enablePermission -n <sessionId>`
-  把会话切到自动权限模式，适合远程开发时减少审批阻塞。
-
-- `/disablePermission -n <sessionId>`
-  恢复默认权限模式。
-
-### 系统信息
-
-- `/sys`
-  查看宿主机和当前代理摘要。
-
-## 关于历史会话
-
-`/list` 会把本机 Codex 的历史对话也列出来。
-
-推荐用法很简单：
-
-1. 先 `/list`
-2. 找到想继续的那条历史对话
-3. 直接 `/activate -n <编号>` 或 `/send -n <编号> -m 继续上次开发`
-
-这样你就可以继续昨天的开发，也可以在多个项目之间切换。
-
-## 常用脚本
-
-```bash
-npm run tg:bot
-npm run repl
-npm run service
-npm run wecom:server
-```
-
-说明：
-
-- `tg:bot`：启动 Telegram 轮询机器人
-- `repl`：本地命令行调试入口
-- `service`：后台服务入口
-- `wecom:server`：企业微信接入入口
-
-## 关键配置项
-
-完整配置见 `.env.example`。
-
-常用项：
+### 常用运行配置
 
 - `TG_BOT_TOKEN`
 - `TG_ALLOWED_CHAT_IDS`
@@ -218,42 +82,279 @@ npm run wecom:server
 - `CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE`
 - `CODEX_PUPPETEER_CODEX_EXEC_PROFILE`
 - `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE`
+- `CODEX_PUPPETEER_CODEX_SANDBOX`
 - `CODEX_PUPPETEER_WAIT_TIMEOUT_MS`
 - `CODEX_PUPPETEER_SEND_WAIT_TIMEOUT_MS`
 - `CODEX_PUPPETEER_STORAGE_DIR`
 - `CODEX_PUPPETEER_LOG_DIR`
 - `CODEX_PUPPETEER_SYSTEM_MODE`
 
-其中：
+### 执行权限建议
 
-- `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS` 用来限制可访问的项目根目录
-- `CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE` 可以设为 `dangerous`，适合个人受信主机远程开发
-- `CODEX_PUPPETEER_SEND_WAIT_TIMEOUT_MS` 已针对长任务场景放宽
+远程控制场景常用两组配置：
 
-## 当前状态
+```env
+CODEX_PUPPETEER_DEFAULT_PERMISSION_MODE=manual
+CODEX_PUPPETEER_CODEX_EXEC_PROFILE=safe
+CODEX_PUPPETEER_CODEX_AUTO_PERMISSION_PROFILE=dangerous
+```
 
-- Telegram 主链路可用
-- 历史会话接管可用
-- 目录浏览、搜索、附件回传可用
-- 会话状态持久化已接入
-- Windows 是当前优先验证平台
-- WeCom 入口仍保留，但不是当前主推荐路径
-- 高风险系统动作仍建议保持 `dry-run`
+含义如下：
 
-## 公开仓库说明
+- `manual + safe`：默认保留审批行为，适合更保守的环境
+- `auto + dangerous`：在启用自动权限后绕过审批和沙箱，适合完全受信任的个人主机
 
-公开仓库默认包含：
+如果你计划把主机长期暴露给远程命令使用，建议优先限制 `TG_ALLOWED_CHAT_IDS` 和 `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`。
 
-- `README.md`
-- `.env.example`
-- `src/`
+## 目录与运行数据
 
-本地私有资料例如 `docs/`、`.agent/`、`tests/`、`AGENTS.md`、`agent-specs/` 不作为公开使用前提，也不会作为公开仓库默认内容。
+默认情况下，程序会在本地生成以下运行目录：
 
-## 后续可扩展方向
+- `.agent/runtime/`
+- `.agent/logs/`
 
-- 增加更多聊天平台接入层
-- 做成常驻系统服务
-- 完善异常恢复与进程接管
-- 优化长任务完成态识别
-- 丰富文件浏览与项目导航能力
+其中通常会保存：
+
+- `sessions.json`
+- `tasks.json`
+- `source-bindings.json`
+
+这些文件用于恢复会话、任务状态和当前聊天绑定关系。部署时建议保留，不要随意清空。
+
+## 快速部署
+
+### 方案一：Telegram 轮询机器人
+
+这是最简单的部署方式，适合个人使用。
+
+1. 安装依赖
+2. 填写 `.env` 或 `.env.example`
+3. 确保本机命令行可以直接执行 `codex`
+4. 启动：
+
+```bash
+npm run tg:bot
+```
+
+启动成功后，终端通常会输出类似信息：
+
+```text
+Telegram polling bot started.
+Allowed chat ids: ...
+Allowed project roots: ...
+Sessions file: ...
+Tasks file: ...
+Source bindings file: ...
+```
+
+此时即可在 Telegram 中给机器人发送命令。
+
+### 方案二：企业微信回调服务
+
+如果你使用企业微信，可启动回调服务器：
+
+```bash
+npm run wecom:server
+```
+
+你需要额外配置企业微信相关参数，例如：
+
+- `WECOM_TOKEN`
+- `WECOM_ENCODING_AES_KEY`
+- `WECOM_RECEIVE_ID`
+- `WECOM_CORP_ID`
+- `WECOM_CORP_SECRET`
+- `WECOM_AGENT_ID`
+
+### 方案三：企业微信托管服务模式
+
+如果你希望使用带持久化、日志和恢复能力的托管服务入口，可使用：
+
+```bash
+npm run service
+```
+
+该入口会使用本地文件仓库、日志目录和异常恢复逻辑，更适合长期运行。
+
+## 推荐部署方式
+
+### Windows
+
+推荐做法：
+
+1. 把项目放到稳定目录
+2. 使用 `.env` 保存正式配置
+3. 先手动运行 `npm run tg:bot` 验证
+4. 稳定后再接入任务计划程序、NSSM 或其他守护方式常驻运行
+
+### macOS / Linux
+
+推荐做法：
+
+1. 使用 `.env` 保存正式配置
+2. 先手动运行 `npm run tg:bot`
+3. 再接入 `pm2`、`systemd`、`launchd` 或其他进程守护工具
+
+## 常用命令
+
+### 会话管理
+
+- `/help`
+  查看帮助和当前运行配置摘要。
+
+- `/projects`
+  列出允许根目录下的项目文件夹。
+
+- `/create -n <名称> -w <项目路径>`
+  创建一个新的托管会话。
+
+- `/list`
+  查看当前托管会话和本机可接管的 Codex 历史对话。
+
+- `/activate -n <编号或sessionId或codexId> [-w <项目路径>]`
+  将某个会话切换为当前聊天的活动会话。
+
+- `/kill -n <sessionId>`
+  终止一个托管会话。
+
+### 对话交互
+
+- `/send -n <目标> -m <内容>`
+  向指定会话或历史对话发送消息，并自动等待当前轮输出。
+
+- 直接发送普通文本
+  如果当前聊天已经绑定活动会话，可直接继续对话。
+
+- `/screen`
+  查看当前活动会话最近输出，适合补看长任务进度。
+
+### 文件浏览
+
+- `/ls`
+  查看当前浏览目录内容。
+
+- `/ls -p <编号>`
+  进入某个子目录。
+
+- `/ls -p ..`
+  返回上一级目录。
+
+- `/find -q <关键词>`
+  搜索文件或目录。
+
+- `/read -f <相对路径>`
+  读取指定文件，并以聊天附件方式返回。
+
+- `/read -f <编号>`
+  读取最近一次 `/ls` 或 `/find` 结果中的编号文件。
+
+### 权限与系统
+
+- `/enablePermission -n <sessionId>`
+  将会话切到自动权限模式。
+
+- `/disablePermission -n <sessionId>`
+  恢复默认权限模式。
+
+- `/sys`
+  查看宿主机和代理的摘要信息。
+
+## 首次使用示例
+
+推荐从下面这组命令开始：
+
+1. `/help`
+2. `/projects`
+3. `/create -n MyTask -w F:\project\MCP`
+4. `/send -n session-0001 -m 请先扫描项目并总结目录结构`
+5. `/screen`
+6. `/ls`
+7. `/read -f README.md`
+
+如果之后还想继续当前会话，可以直接发送普通文本，无需每次都写 `/send`。
+
+## 历史会话接续
+
+`/list` 会同时展示两类内容：
+
+- 当前系统已经托管的会话
+- 本机 Codex 可恢复的历史对话
+
+你可以通过以下方式继续之前的工作：
+
+```text
+/list
+/activate -n 3
+继续上次的开发
+```
+
+或者：
+
+```text
+/send -n 3 -m 继续上次的开发
+```
+
+## 常用脚本
+
+```bash
+npm run tg:bot
+npm run wecom:server
+npm run service
+npm run repl
+```
+
+说明：
+
+- `tg:bot`：启动 Telegram 轮询机器人
+- `wecom:server`：启动企业微信回调服务
+- `service`：启动带日志、恢复和持久化能力的托管服务入口
+- `repl`：本地调试入口
+
+## 运维建议
+
+- 使用独立账号和独立主机运行
+- 仅放开必要的 `TG_ALLOWED_CHAT_IDS`
+- 严格限制 `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS`
+- 生产环境优先使用 `.env`，不要直接提交真实密钥
+- 保留 `.agent/runtime/` 目录，避免丢失会话恢复能力
+- 对高风险系统动作保持 `CODEX_PUPPETEER_SYSTEM_MODE=dry-run`
+
+## 常见问题
+
+### 1. 机器人启动后没有响应
+
+请优先检查：
+
+- `TG_BOT_TOKEN` 是否正确
+- `TG_ALLOWED_CHAT_IDS` 是否包含当前聊天 ID
+- 本机是否能正常访问 Telegram API
+- 终端中是否出现轮询报错信息
+
+### 2. 发送命令后 Codex 无法启动
+
+请检查：
+
+- 本机命令行是否可以直接执行 `codex`
+- 项目路径是否在 `CODEX_PUPPETEER_ALLOWED_PROJECT_ROOTS` 允许范围内
+- 当前用户是否有目标目录访问权限
+
+### 3. 为什么重启后还能看到之前的会话
+
+因为程序默认会把会话、任务和聊天绑定关系保存在 `.agent/runtime/` 中，用于恢复运行状态。
+
+### 4. 为什么读取文件时返回的是附件
+
+这是为了更适合在移动端查看文档、Markdown 和配置文件，避免长文本直接塞满聊天窗口。
+
+## 安全说明
+
+本项目具备远程执行和会话控制能力，部署时请务必注意：
+
+- 不要泄露机器人 Token 或企业微信凭据
+- 不要把允许访问的项目根目录配置得过大
+- 不要在不受信任的主机上使用 `dangerous` 执行档
+- 在确认风险前，保持系统动作处于 `dry-run`
+
+## License
+
+如果你计划正式开源发布，建议补充项目许可证文件，例如 `MIT`。
