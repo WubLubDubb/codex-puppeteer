@@ -304,4 +304,4 @@ npm run test
 
 ## License
 
-如果你计划正式开源发布，建议补充许可证文件，例如 `MIT`。
+本项目采用 MIT License。详见 [LICENSE](/f:/Project/codex-puppeteer/LICENSE)。
