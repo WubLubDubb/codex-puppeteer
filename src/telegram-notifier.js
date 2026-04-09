@@ -26,6 +26,26 @@ function normalizeDocumentAttachment(attachment) {
   };
 }
 
+function normalizeEditDelivery(delivery) {
+  if (delivery?.mode !== "edit-message") {
+    return null;
+  }
+
+  const chatId = String(delivery.chatId ?? "").trim();
+  const messageId = String(delivery.messageId ?? "").trim();
+
+  if (!chatId || !messageId) {
+    return null;
+  }
+
+  return {
+    mode: "edit-message",
+    chatId,
+    messageId,
+    fallbackToSend: delivery.fallbackToSend !== false
+  };
+}
+
 function splitMessageContent(content, maxMessageLength) {
   const text = String(content ?? "");
   if (!text) {
@@ -95,6 +115,7 @@ export class TelegramBotNotifier {
       notification.replyMarkup && typeof notification.replyMarkup === "object"
         ? structuredClone(notification.replyMarkup)
         : null;
+    const editDelivery = normalizeEditDelivery(notification.delivery);
 
     if (!content && !attachment) {
       throw new AdapterExecutionError(
@@ -129,6 +150,37 @@ export class TelegramBotNotifier {
     }
 
     const messageChunks = splitMessageContent(content, this.maxMessageLength);
+
+    if (editDelivery && messageChunks.length === 1 && typeof this.client?.editMessageText === "function") {
+      try {
+        const remoteResult = await this.client.editMessageText({
+          chatId: editDelivery.chatId,
+          messageId: editDelivery.messageId,
+          text: messageChunks[0],
+          replyMarkup
+        });
+
+        const record = {
+          ...notification,
+          sentAt: now(),
+          remoteResult,
+          remoteResults: [
+            {
+              content: messageChunks[0],
+              remoteResult
+            }
+          ],
+          chunkCount: 1
+        };
+        this.messages.push(record);
+        return structuredClone(record);
+      } catch (error) {
+        if (!editDelivery.fallbackToSend) {
+          throw error;
+        }
+      }
+    }
+
     const remoteResults = [];
 
     for (const chunk of messageChunks) {

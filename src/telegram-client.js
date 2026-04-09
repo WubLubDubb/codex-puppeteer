@@ -28,6 +28,19 @@ function normalizeChatId(chatId) {
   return value;
 }
 
+function normalizeMessageId(messageId) {
+  const value = Number(messageId);
+
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new ConfigurationError(
+      "Telegram message id must be a positive integer.",
+      "telegram_message_id_invalid"
+    );
+  }
+
+  return value;
+}
+
 function shouldFallbackToPowerShell(error) {
   const causeCode = error?.cause?.code ?? null;
   const message = String(error?.message ?? "");
@@ -53,6 +66,15 @@ function normalizeReplyMarkup(replyMarkup) {
   }
 
   return structuredClone(replyMarkup);
+}
+
+function isTelegramMessageNotModifiedError(error) {
+  if (!(error instanceof AdapterExecutionError) || error.code !== "telegram_api_error") {
+    return false;
+  }
+
+  const description = String(error?.details?.description ?? error.message ?? "");
+  return /message is not modified/i.test(description);
 }
 
 function formatPowerShellDiagnostic(value, maxLength = 500) {
@@ -396,6 +418,37 @@ export class TelegramBotClient {
       disable_web_page_preview: disableWebPagePreview,
       ...(normalizedReplyMarkup ? { reply_markup: normalizedReplyMarkup } : {})
     });
+  }
+
+  async editMessageText({
+    chatId,
+    messageId,
+    text,
+    disableWebPagePreview = true,
+    replyMarkup = null
+  } = {}) {
+    const normalizedReplyMarkup = normalizeReplyMarkup(replyMarkup);
+    const resolvedChatId = normalizeChatId(chatId);
+    const resolvedMessageId = normalizeMessageId(messageId);
+
+    try {
+      return await this.#callApi("editMessageText", {
+        chat_id: resolvedChatId,
+        message_id: resolvedMessageId,
+        text: String(text ?? ""),
+        disable_web_page_preview: disableWebPagePreview,
+        ...(normalizedReplyMarkup ? { reply_markup: normalizedReplyMarkup } : {})
+      });
+    } catch (error) {
+      if (isTelegramMessageNotModifiedError(error)) {
+        return {
+          message_id: resolvedMessageId,
+          unchanged: true
+        };
+      }
+
+      throw error;
+    }
   }
 
   async answerCallbackQuery({ callbackQueryId, text = "", showAlert = false } = {}) {

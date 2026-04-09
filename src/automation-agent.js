@@ -285,6 +285,16 @@ function paginateSelectionEntries(entries, page, pageSize) {
   };
 }
 
+const TELEGRAM_IN_PLACE_EDITABLE_COMMANDS = new Set([
+  "help",
+  "current",
+  "projects",
+  "list",
+  "ls",
+  "find",
+  "mode"
+]);
+
 function buildHelpMessage(config) {
   const allowedRoots = Array.isArray(config?.security?.allowedProjectRoots)
     ? config.security.allowedProjectRoots.filter((entry) => String(entry ?? "").trim() !== "")
@@ -897,7 +907,7 @@ export class AutomationAgent {
       return null;
     }
 
-    return buildInlineButton(`${page}/${totalPages}`, command);
+    return buildInlineButton(`第 ${page}/${totalPages} 页`, command);
   }
 
   #buildPaginationRow({ currentPage, totalPages, buildCommand }) {
@@ -935,50 +945,63 @@ export class AutomationAgent {
     return `/${normalizedMode} -pg ${Math.max(1, page)}`;
   }
 
+  #buildSingleButtonRow(text, command) {
+    const button = buildInlineButton(text, command);
+    return button ? [[button]] : [];
+  }
+
+  #buildPageTitleRows(text, command) {
+    return this.#buildSingleButtonRow(text, command);
+  }
+
+  #buildSectionRows(text, command) {
+    return this.#buildSingleButtonRow(text, command);
+  }
+
+  #buildActiveSessionQuickActionRows({
+    includeScreen = false,
+    includeMode = false
+  } = {}) {
+    const row = [];
+
+    if (includeScreen) {
+      row.push(buildInlineButton("查看当前输出", "/screen"));
+    }
+
+    if (includeMode) {
+      row.push(buildInlineButton("查看权限详情", "/mode"));
+    }
+
+    return row.length > 0 ? [row] : [];
+  }
+
   #buildPrimaryNavigationRows({
     includeProjects = true,
     includeList = true,
     includeCurrent = true,
-    includeHelp = false,
-    includeScreen = false,
-    includeMode = false,
-    hasActiveSession = false
+    includeHelp = false
   } = {}) {
     const rows = [];
     const primaryRow = [];
 
     if (includeProjects) {
-      primaryRow.push(buildInlineButton("项目", "/projects"));
+      primaryRow.push(buildInlineButton("项目列表", "/projects"));
     }
 
     if (includeList) {
-      primaryRow.push(buildInlineButton("会话", "/list"));
+      primaryRow.push(buildInlineButton("会话列表", "/list"));
     }
 
     if (includeCurrent) {
-      primaryRow.push(buildInlineButton("当前", "/current"));
+      primaryRow.push(buildInlineButton("当前会话", "/current"));
     }
 
     if (primaryRow.length > 0) {
       rows.push(primaryRow);
     }
 
-    const secondaryRow = [];
-
-    if (hasActiveSession && includeScreen) {
-      secondaryRow.push(buildInlineButton("输出", "/screen"));
-    }
-
-    if (hasActiveSession && includeMode) {
-      secondaryRow.push(buildInlineButton("模式", "/mode"));
-    }
-
     if (includeHelp) {
-      secondaryRow.push(buildInlineButton("帮助", "/help"));
-    }
-
-    if (secondaryRow.length > 0) {
-      rows.push(secondaryRow);
+      rows.push([buildInlineButton("使用帮助", "/help")]);
     }
 
     return rows;
@@ -996,21 +1019,23 @@ export class AutomationAgent {
     const toggleModeCommand =
       session.permissionMode === "auto" ? "/mode manual" : "/mode auto";
     const toggleModeLabel =
-      session.permissionMode === "auto" ? "切到 manual" : "切到 auto";
+      session.permissionMode === "auto" ? "关闭自动权限" : "开启自动权限";
 
     return buildInlineKeyboard([
+      ...this.#buildPageTitleRows("当前页面: 当前会话", "/current"),
       [
-        buildInlineButton("查看输出", "/screen"),
-        buildInlineButton("浏览文件", "/ls")
+        buildInlineButton("查看当前输出", "/screen"),
+        buildInlineButton("浏览项目文件", "/ls")
       ],
       [
         buildInlineButton(toggleModeLabel, toggleModeCommand),
-        buildInlineButton("模式详情", "/mode")
+        buildInlineButton("查看权限详情", "/mode")
       ],
       ...this.#buildPrimaryNavigationRows({
         includeProjects: true,
         includeList: true,
-        includeCurrent: true
+        includeCurrent: false,
+        includeHelp: true
       })
     ]);
   }
@@ -1020,9 +1045,12 @@ export class AutomationAgent {
     { hasActiveSession = false, page = 1, pageSize = 8 } = {}
   ) {
     const pagination = paginateSelectionEntries(selectionEntries, page, pageSize);
-    const rows = pagination.pageEntries.map((entry) => [
-      buildInlineButton(`${entry.index}. ${entry.name}`, `/create ${entry.index}`)
-    ]);
+    const rows = [
+      ...this.#buildPageTitleRows("当前页面: 项目列表", this.#buildProjectsCommand(page)),
+      ...pagination.pageEntries.map((entry) => [
+        buildInlineButton(`创建会话: ${entry.name}`, `/create ${entry.index}`)
+      ])
+    ];
 
     rows.push(
       ...this.#buildPaginationRow({
@@ -1031,16 +1059,19 @@ export class AutomationAgent {
         buildCommand: (targetPage) => this.#buildProjectsCommand(targetPage)
       })
     );
-    rows.push([buildInlineButton("刷新项目列表", "/projects")]);
+    rows.push([buildInlineButton("重新加载项目列表", "/projects")]);
+    if (hasActiveSession) {
+      rows.push(...this.#buildActiveSessionQuickActionRows({
+        includeScreen: true,
+        includeMode: true
+      }));
+    }
     rows.push(
       ...this.#buildPrimaryNavigationRows({
         includeProjects: false,
         includeList: true,
         includeCurrent: true,
-        includeHelp: true,
-        includeScreen: true,
-        includeMode: true,
-        hasActiveSession
+        includeHelp: true
       })
     );
 
@@ -1052,18 +1083,44 @@ export class AutomationAgent {
     { hasActiveSession = false, page = 1, pageSize = 6, showAll = false, count = null } = {}
   ) {
     const pagination = paginateSelectionEntries(selectionEntries, page, pageSize);
-    const rows = [];
+    const rows = [
+      ...this.#buildPageTitleRows(
+        "当前页面: 会话列表",
+        this.#buildListCommand({ showAll, count, page })
+      )
+    ];
+    const managedEntries = pagination.pageEntries.filter((entry) => entry?.type === "managed");
+    const localEntries = pagination.pageEntries.filter((entry) => entry?.type !== "managed");
 
-    for (const entry of pagination.pageEntries) {
+    if (managedEntries.length > 0) {
+      rows.push(
+        ...this.#buildSectionRows(
+          "当前托管会话",
+          this.#buildListCommand({ showAll, count, page })
+        )
+      );
+    }
+
+    for (const entry of managedEntries) {
       if (entry?.type === "managed") {
         rows.push([
-          buildInlineButton(`激活 ${entry.index}`, `/activate ${entry.index}`),
-          buildInlineButton(`输出 ${entry.index}`, `/screen -n ${entry.index}`)
+          buildInlineButton(`切换到会话 ${entry.index}`, `/activate ${entry.index}`),
+          buildInlineButton(`查看会话 ${entry.index} 输出`, `/screen -n ${entry.index}`)
         ]);
-        continue;
       }
+    }
 
-      rows.push([buildInlineButton(`激活 ${entry.index}`, `/activate ${entry.index}`)]);
+    if (localEntries.length > 0) {
+      rows.push(
+        ...this.#buildSectionRows(
+          "本机历史对话",
+          this.#buildListCommand({ showAll, count, page })
+        )
+      );
+    }
+
+    for (const entry of localEntries) {
+      rows.push([buildInlineButton(`接管历史 ${entry.index}`, `/activate ${entry.index}`)]);
     }
 
     rows.push(
@@ -1078,29 +1135,42 @@ export class AutomationAgent {
           })
       })
     );
+    if (hasActiveSession) {
+      rows.push(...this.#buildActiveSessionQuickActionRows({
+        includeScreen: true,
+        includeMode: true
+      }));
+    }
     rows.push(
       ...this.#buildPrimaryNavigationRows({
         includeProjects: true,
         includeList: false,
         includeCurrent: true,
-        includeHelp: true,
-        includeScreen: true,
-        includeMode: true,
-        hasActiveSession
+        includeHelp: true
       })
     );
 
     return buildInlineKeyboard(rows);
   }
 
-  #buildBrowseReplyMarkup(selectionEntries = [], { page = 1, pageSize = 8, mode = "ls" } = {}) {
+  #buildBrowseReplyMarkup(
+    selectionEntries = [],
+    { page = 1, pageSize = 8, mode = "ls", title = null } = {}
+  ) {
     const pagination = paginateSelectionEntries(selectionEntries, page, pageSize);
-    const rows = [];
+    const rows = [
+      ...this.#buildPageTitleRows(
+        title ?? (mode === "find" ? "当前页面: 搜索结果" : "当前页面: 文件浏览"),
+        this.#buildBrowseCommand(mode, page)
+      )
+    ];
 
     for (const entry of pagination.pageEntries) {
       rows.push([
         buildInlineButton(
-          `${entry.index}. ${entry.name}${entry.type === "directory" ? "/" : ""}`,
+          entry.type === "directory"
+            ? `打开目录: ${entry.name}`
+            : `下载文件: ${entry.name}`,
           entry.type === "directory" ? `/ls -p ${entry.index}` : `/read -f ${entry.index}`
         )
       ]);
@@ -1114,10 +1184,21 @@ export class AutomationAgent {
       })
     );
     rows.push([
-      buildInlineButton("上一级", "/ls -p .."),
-      buildInlineButton("根目录", "/ls -p /")
+      buildInlineButton("返回上一级", "/ls -p .."),
+      buildInlineButton("回到根目录", "/ls -p /")
     ]);
-    rows.push([buildInlineButton("当前上下文", "/current")]);
+    rows.push(...this.#buildActiveSessionQuickActionRows({
+      includeScreen: true,
+      includeMode: true
+    }));
+    rows.push(
+      ...this.#buildPrimaryNavigationRows({
+        includeProjects: true,
+        includeList: true,
+        includeCurrent: true,
+        includeHelp: true
+      })
+    );
 
     return buildInlineKeyboard(rows);
   }
@@ -1128,32 +1209,81 @@ export class AutomationAgent {
     }
 
     return buildInlineKeyboard([
+      ...this.#buildPageTitleRows("当前页面: 权限模式", "/mode"),
       [
-        buildInlineButton("切到 auto", "/mode auto"),
-        buildInlineButton("切到 manual", "/mode manual")
+        buildInlineButton("开启自动权限", "/mode auto"),
+        buildInlineButton("关闭自动权限", "/mode manual")
       ],
       [
-        buildInlineButton("查看输出", "/screen"),
-        buildInlineButton("当前上下文", "/current")
+        buildInlineButton("查看当前输出", "/screen"),
+        buildInlineButton("查看当前会话", "/current")
       ],
       ...this.#buildPrimaryNavigationRows({
         includeProjects: true,
         includeList: true,
-        includeCurrent: false
+        includeCurrent: false,
+        includeHelp: true
       })
     ]);
+  }
+
+  #getTelegramCallbackContext(message) {
+    const telegramContext = message?.transportContext?.telegram ?? null;
+
+    if (telegramContext?.kind !== "callback_query") {
+      return null;
+    }
+
+    const callbackQueryId = String(telegramContext.callbackQueryId ?? "").trim();
+    const callbackChatId = String(telegramContext.callbackChatId ?? "").trim();
+    const callbackMessageId = String(telegramContext.callbackMessageId ?? "").trim();
+
+    if (!callbackQueryId || !callbackChatId || !callbackMessageId) {
+      return null;
+    }
+
+    return {
+      callbackQueryId,
+      callbackChatId,
+      callbackMessageId
+    };
+  }
+
+  #shouldSuppressProgressNotifications(message) {
+    return Boolean(this.#getTelegramCallbackContext(message));
+  }
+
+  #resolveCompletionDelivery(message, parsedCommand, response) {
+    const callbackContext = this.#getTelegramCallbackContext(message);
+
+    if (!callbackContext || response?.attachment) {
+      return null;
+    }
+
+    if (!TELEGRAM_IN_PLACE_EDITABLE_COMMANDS.has(parsedCommand?.commandKey)) {
+      return null;
+    }
+
+    return {
+      mode: "edit-message",
+      chatId: callbackContext.callbackChatId,
+      messageId: callbackContext.callbackMessageId,
+      fallbackToSend: true
+    };
   }
 
   async receiveText(message) {
     const taskId = this.repository.nextTaskId();
     this.repository.createTask({ taskId, message });
 
-    await this.notifier.send({
-      taskId,
-      phase: "command.received",
-      sourceId: message.sourceId,
-      message: `Received command from ${message.sourceId}.`
-    });
+    if (!this.#shouldSuppressProgressNotifications(message)) {
+      await this.notifier.send({
+        taskId,
+        phase: "command.received",
+        sourceId: message.sourceId,
+        message: `Received command from ${message.sourceId}.`
+      });
+    }
 
     try {
       const parsedCommand = this.#parseIncomingMessage(message);
@@ -1216,16 +1346,19 @@ export class AutomationAgent {
       error: null
     });
 
-    await this.notifier.send({
-      taskId,
-      phase: "command.started",
-      sourceId: message.sourceId,
-      message: `Command ${parsedCommand.commandKey} started.`
-    });
+    if (!this.#shouldSuppressProgressNotifications(message)) {
+      await this.notifier.send({
+        taskId,
+        phase: "command.started",
+        sourceId: message.sourceId,
+        message: `Command ${parsedCommand.commandKey} started.`
+      });
+    }
 
     try {
       const response = await this.#dispatchCommand(parsedCommand, message, taskId);
       const completionMessage = formatCommandResponseMessage(response);
+      const completionDelivery = this.#resolveCompletionDelivery(message, parsedCommand, response);
       this.repository.completeStep(taskId, stepId, response);
       this.repository.setResponse(taskId, response);
       this.repository.setStatus(taskId, "completed", {
@@ -1241,7 +1374,8 @@ export class AutomationAgent {
         sourceId: message.sourceId,
         message: completionMessage,
         attachment: response?.attachment ?? null,
-        replyMarkup: response?.replyMarkup ?? null
+        replyMarkup: response?.replyMarkup ?? null,
+        delivery: completionDelivery
       });
 
       return this.repository.getTask(taskId);
@@ -1670,7 +1804,8 @@ export class AutomationAgent {
       rendered: renderedLines.join("\n"),
       replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries, {
         page: requestedPage ?? 1,
-        mode: "ls"
+        mode: "ls",
+        title: `当前目录: ${formatBrowseRelativePath(result.directory.relativePath)}`
       })
     };
   }
@@ -1749,7 +1884,8 @@ export class AutomationAgent {
       rendered: renderedLines.join("\n"),
       replyMarkup: this.#buildBrowseReplyMarkup(selectionEntries, {
         page: requestedPage ?? 1,
-        mode: "find"
+        mode: "find",
+        title: `当前搜索: ${query}`
       })
     };
   }

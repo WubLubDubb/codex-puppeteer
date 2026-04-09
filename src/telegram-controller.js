@@ -10,6 +10,18 @@ function deriveMessageId(update, message) {
   return String(message?.message_id ?? update?.update_id ?? `${Date.now()}`);
 }
 
+function buildTelegramCallbackTransportContext(callbackQuery, message) {
+  return {
+    channel: "telegram",
+    telegram: {
+      kind: "callback_query",
+      callbackQueryId: String(callbackQuery?.id ?? "").trim() || null,
+      callbackChatId: String(message?.chat?.id ?? "").trim() || null,
+      callbackMessageId: String(message?.message_id ?? "").trim() || null
+    }
+  };
+}
+
 export class TelegramUpdateController {
   constructor({
     agent,
@@ -114,7 +126,8 @@ export class TelegramUpdateController {
     const automationMessage = {
       sourceId,
       messageId: String(callbackQuery.id ?? deriveMessageId(update, message)),
-      content: callbackQuery.data.trim()
+      content: callbackQuery.data.trim(),
+      transportContext: buildTelegramCallbackTransportContext(callbackQuery, message)
     };
 
     if (this.commandDispatchMode === "async") {
